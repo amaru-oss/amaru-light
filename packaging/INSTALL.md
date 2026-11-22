@@ -29,8 +29,9 @@ extracted directory. Keep bin/, config/, projects/, skills/ and web/ together.
    Existing nonempty directories are preserved. Included project YAML
    files from the build machine are additional examples; adjust their paths.
 2. Edit `config/providers.yaml`, `models.yaml` and `routing.yaml` for your installed
-   tools/models. In particular, remove or adjust the Codex `CODEX_HOME` override
-   if you do not use `~/.codex-plus` on this machine.
+   tools/models. Codex inherits `CODEX_HOME` from the environment that starts
+   Mini-Amaru. If upgrading an older config, remove any
+   `providers.codex.env.CODEX_HOME` entry to inherit that value.
 
 If planning reports no available model, run `./mini-amaru doctor -c projects/example.yaml`
 with the same project config and shell you use for `serve`. The bundled routing

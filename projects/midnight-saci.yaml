@@ -46,6 +46,7 @@ models:
     - claude-haiku
     - claude-sonnet
     - codex-default
+    - codex-classic
     - ollama-planner
 
 skills:

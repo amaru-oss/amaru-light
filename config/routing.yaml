@@ -6,5 +6,5 @@ routing:
   debugging: codex-default
   code_review: codex-default
   fallback:
-    - claude-sonnet
     - codex-default
+    - claude-sonnet

@@ -28,7 +28,7 @@ merge:
   method: squash
 
 models:
-  allowed: [claude-haiku, claude-sonnet, codex-default, ollama-planner]
+  allowed: [claude-haiku, claude-sonnet, codex-default, codex-classic, ollama-planner]
 skills:
   directory: ../skills
   defaults: [engineering/implementation, conventions/git-workflow]

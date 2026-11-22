@@ -15,11 +15,10 @@ providers:
   codex:
     enabled: true
     type: cli
-    # Alias zsh 'codex-plus' nao existe para subprocessos: usa o binario e o CODEX_HOME do alias.
+    # CODEX_HOME e herdado do ambiente do processo Mini-Amaru.
     command: ["codex", "exec", "--model", "{model}", "-"]
-    env:
-      CODEX_HOME: ~/.codex-plus
     models:
+      - gpt-6.2-sol
       - gpt-6.1-sol
       - gpt-5.6-sol
     default_model: gpt-6.1-sol
