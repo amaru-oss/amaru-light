@@ -1,0 +1,13 @@
+.git
+.idea
+.env
+**/.env
+**/.env.*
+**/.DS_Store
+target
+data
+repos
+dist
+web/dist
+web/node_modules
+web/.tanstack

@@ -149,6 +149,73 @@ A interface oferece dashboard, lista de execuções, formulário de objetivo, de
 Para servir o frontend compilado pelo próprio binário: `VITE_API_URL='' npm --prefix web run build`
 e `cargo run -- -c projects/meu-projeto.yaml serve --web-dir web/dist`.
 
+## Podman
+
+Em macOS, inicie a VM com `podman machine start` (use `podman machine init`
+primeiro se ainda não tiver uma VM). Na raiz do projeto, rode `make image`.
+A imagem base `localhost/mini-amaru:latest` usa Fedora Minimal 45 e inclui o
+binário Linux, o dashboard, Git e `gh`. Crie uma imagem derivada para cada
+projeto, com a CLI do agente e as ferramentas exigidas pelo build e pelos testes.
+
+Por exemplo, se seu projeto usa Go e você já tem uma CLI de agente compatível
+com Linux, salve um `Containerfile.projeto` no seu contexto de build:
+
+```dockerfile
+FROM localhost/mini-amaru:latest
+USER root
+RUN microdnf install -y golang make && microdnf clean all
+COPY --chmod=755 meu-agente /usr/local/bin/meu-agente
+COPY providers.yaml /app/config/providers.yaml
+COPY models.yaml /app/config/models.yaml
+COPY routing.yaml /app/config/routing.yaml
+COPY projeto.yaml /app/projects/projeto.yaml
+USER mini-amaru
+```
+
+Use os YAMLs em `config/` e `packaging/example.yaml` como referência.
+Configure o comando do agente em `providers.yaml` para receber o prompt pelo
+stdin e emitir a resposta pelo stdout. Os IDs em `routing.yaml` precisam
+existir em `models.yaml` e ser permitidos pelo projeto. Configure
+`project.root: ../repos/meu-projeto` e o comando de checks do projeto no
+`projeto.yaml`. Mantenha credenciais fora do contexto de build.
+
+```sh
+podman build -f Containerfile.projeto -t localhost/mini-amaru-projeto:latest .
+```
+
+Use volumes nomeados para persistir jobs, worktrees, checkouts e a configuração
+da conta do container.
+
+```sh
+podman run -d --name mini-amaru \
+  -p 127.0.0.1:8765:8765 \
+  -v mini-amaru-data:/app/data:U \
+  -v mini-amaru-repos:/app/repos:U \
+  -v mini-amaru-home:/home/mini-amaru:U \
+  localhost/mini-amaru-projeto:latest \
+  serve -c projects/projeto.yaml --host 0.0.0.0 \
+  --cors-origin http://127.0.0.1:8765 --cors-origin http://localhost:8765
+```
+
+Abra **http://127.0.0.1:8765** na máquina onde o Podman publica a porta.
+Antes do primeiro job, autentique o agente instalado na imagem derivada e o
+`gh` dentro do container. A configuração no diretório pessoal persiste no
+volume `mini-amaru-home`.
+
+```sh
+podman exec -it mini-amaru gh auth login --hostname github.com --git-protocol https --web
+podman exec mini-amaru gh auth setup-git
+podman exec mini-amaru /app/mini-amaru doctor -c projects/projeto.yaml
+```
+
+Configure `git config --global user.name` e `user.email` dentro do container
+se os agentes precisarem criar commits. Para outro projeto, monte a configuração
+com `-v "$PWD/projects:/app/projects:ro,Z"` e selecione o YAML com `-c`. Use um
+caminho relativo como `../repos/meu-projeto` no YAML. O primeiro job pode clonar
+o repositório no volume com a autenticação do `gh`. Em hosts com SELinux, use
+`:Z` para rotular os bind mounts. Se mudar a porta publicada, ajuste as origens
+para a URL que o navegador usa.
+
 ## Dados e configuração
 
 - `config/runtime.yaml`: SQLite, artefatos e retries.

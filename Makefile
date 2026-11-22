@@ -1,16 +1,19 @@
 CARGO ?= cargo
 NPM ?= npm
+PODMAN ?= podman
+IMAGE ?= localhost/mini-amaru:latest
 TARGET ?=
 CONFIG ?= projects/amaru.yaml
 PROMPT ?= Descreva aqui o objetivo
 GOAL ?= Continue the work of Milestone 5 until it is completed.
 
-.PHONY: help install package check doctor run resume status jobs serve loop loop-dry clean
+.PHONY: help install package image check doctor run resume status jobs serve loop loop-dry clean
 
 help:
 	@echo "Mini-Amaru (Rust)"
 	@echo "  make install                         build release binary"
 	@echo "  make package                         build installable archive in dist/"
+	@echo "  make image                           build the Podman image"
 	@echo "  make check                           format, lint and test"
 	@echo "  make doctor                          check configuration and tools"
 	@echo "  make run PROMPT='...'                 run a job"
@@ -26,6 +29,9 @@ install:
 
 package:
 	CARGO="$(CARGO)" NPM="$(NPM)" TARGET="$(TARGET)" ./scripts/package.sh
+
+image:
+	$(PODMAN) build -f Containerfile -t "$(IMAGE)" .
 
 check:
 	$(CARGO) fmt --all -- --check
