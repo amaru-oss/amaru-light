@@ -105,13 +105,49 @@ and the runtime user's home directory, respectively. Use project-specific
 volume names. The dashboard uses the host port above. If you change that
 port, update each browser origin accordingly.
 
+### Sign in to the agent from inside the container
+
+Use the named volume mounted at `/home/mini-amaru` as the container's home.
+Once the container is running, the user signs in with the installed CLI as
+`mini-amaru`. Reuse the same volume when recreating the container so file-based
+login state persists. If the image sets `CODEX_HOME` or `CLAUDE_CONFIG_DIR`,
+keep that directory on the volume and use the same setting for both login
+and jobs.
+
+For Codex with a ChatGPT account, use device login and open the displayed
+URL in a host browser. Device login must be enabled for the account or
+workspace. See the [Codex headless login guide](https://learn.chatgpt.com/docs/auth#login-on-headless-devices).
+
+```sh
+podman exec -it amaru-light-my-project codex login --device-auth
+podman exec amaru-light-my-project codex login status
+```
+
+For Claude Code, run its own login flow and complete the browser steps it
+prints in the terminal. See the [Claude Code authentication guide](https://code.claude.com/docs/en/authentication).
+
+```sh
+podman exec -it amaru-light-my-project claude auth login
+podman exec amaru-light-my-project claude auth status
+```
+
+The host settings directory is optional. If you want to reuse preferences,
+copy or mount individual settings files after checking for host-specific
+paths, hooks, and credential helpers. A macOS Keychain login stays on the
+host even if you mount the CLI's settings directory into the Linux container.
+For unattended API-key authentication, use the selected provider's runtime
+secret mechanism. Keep credentials out of the image and committed YAML.
+
+### Verify the runtime
+
 1. Confirm that health reports the expected project and `doctor` resolves
    the planning model. A missing checkout is expected on a fresh volume.
    When a job first needs it, Amaru Light can clone the configured repository
    through `gh`.
-2. Authenticate the agent and GitHub CLI inside the container as the runtime
-   user. For GitHub over HTTPS, run `gh auth setup-git` after login. Set a Git
-   name and email in the container if the workflow creates commits.
+2. Check the selected agent's login status and authenticate GitHub CLI
+   separately inside the container as the runtime user. For GitHub over
+   HTTPS, run `gh auth setup-git` after login. Set a Git name and email in the
+   container if the workflow creates commits.
 3. Verify the checkout and dependency caches are writable and dependency
    hosts resolve from the agent's execution environment. Run the project's
    check command there. If an agent uses its own sandbox, repeat these checks
