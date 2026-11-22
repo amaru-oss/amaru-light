@@ -1,0 +1,64 @@
+project:
+  name: midnight-saci
+  repository: orpiske/midnight-saci/
+  root: ../repos/midnight-saci
+
+git:
+  base_branch: main
+  branch_prefix: quick-fix          # so para itens sem issue; issues usam <prefixo>/<n>-<slug>
+  branch_prefixes:               # label -> prefixo (padrao: feat); ver delivery.md do Amaru §5
+    bug: ci-issue
+    documentation: docs
+    migration-adr: docs
+    spike: spike
+
+execution:
+  max_parallel_agents: 1
+  require_tests: true
+  require_review: false
+  check_command: make check      # roda no worktree antes de abrir o PR; falha = sem PR
+  check_timeout_seconds: 1800
+
+# --- loop de entrega (cargo run -- loop ...) ---
+loop:
+  max_iterations: 20             # itens de trabalho por execucao do loop
+  max_tasks_per_item: 8
+  skip_labels: [owner-task, awaiting-owner-approval, milestone-exit]   # portoes humanos: nunca executados
+  create_integration_branch: true   # cria feat/<pai>-<slug> a partir da base se a sub-issue nao tiver
+  worktrees_dir: data/worktrees
+  on_blocked: stop               # stop | brain (brain escolhe pular o item)
+  on_waiting: stop               # stop | continue (continuar mesmo com PR aguardando merge)
+  brain_route: planning
+
+publish:
+  mode: auto                     # auto | manual (manual: para em WAITING_PR; a UI cria o PR)
+
+review:
+  enabled: true                  # agente revisor independente comenta no PR
+  max_rounds: 1                  # rodadas de correcao antes de BLOCKED
+
+merge:
+  mode: integration_only         # manual | integration_only | always
+  method: rebase
+
+models:
+  allowed:
+    - claude-haiku
+    - claude-sonnet
+    - codex-default
+    - ollama-planner
+
+skills:
+  directory: ../skills
+  defaults:
+    - engineering/implementation
+    - conventions/git-workflow
+
+github:
+  cli: gh
+  # Se null, o runtime extrai "Milestone 5" do prompt.
+  milestone: null
+  # Configure um numero OU um label exclusivo para issue de encerramento.
+  exit_issue_number: null
+  exit_issue_label: null
+  publish_report: true

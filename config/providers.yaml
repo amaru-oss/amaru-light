@@ -1,0 +1,46 @@
+# CLI providers recebem o prompt via stdin. Ajuste command/model conforme
+# a versao da CLI instalada. Placeholders: {model}.
+providers:
+  claude:
+    enabled: true
+    type: cli
+    # acceptEdits: sem isso o claude -p nao consegue editar arquivos em modo nao interativo.
+    command: ["claude", "-p", "--output-format", "text", "--model", "{model}", "--permission-mode", "acceptEdits"]
+    models:
+      - haiku
+      - sonnet
+    default_model: sonnet
+    timeout_seconds: 3600
+
+  codex:
+    enabled: true
+    type: cli
+    # Alias zsh 'codex-plus' nao existe para subprocessos: usa o binario e o CODEX_HOME do alias.
+    command: ["codex", "exec", "--model", "{model}", "-"]
+    env:
+      CODEX_HOME: ~/.codex-plus
+    models:
+      - gpt-6.1-sol
+      - gpt-5.6-sol
+    default_model: gpt-6.1-sol
+    timeout_seconds: 3600
+
+  opencode:
+    enabled: false
+    type: cli
+    # Ajuste conforme a CLI e o provider configurados no seu ambiente.
+    command: ["opencode", "run", "--model", "{model}"]
+    models:
+      - anthropic/claude-sonnet
+    default_model: anthropic/claude-sonnet
+    timeout_seconds: 3600
+
+  ollama:
+    enabled: false
+    type: ollama
+    endpoint: http://localhost:11434
+    models:
+      - qwen3
+      - glm-4.7-flash
+    default_model: qwen3
+    timeout_seconds: 600

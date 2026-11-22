@@ -1,0 +1,10 @@
+routing:
+  planning: codex-classic
+  summarization: codex-default
+  simple_implementation: codex-default
+  complex_implementation: codex-default
+  debugging: codex-default
+  code_review: codex-default
+  fallback:
+    - claude-sonnet
+    - codex-default
