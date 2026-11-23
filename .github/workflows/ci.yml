@@ -1,0 +1,171 @@
+name: CI
+
+# Checks every pull request and every push to main and to a release tag.
+# After all checks pass, pushes to main and release tags publish the base
+# image to the GitHub Container Registry. Pull requests never publish.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CONTAINER_REGISTRY: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io' }}
+  CONTAINER_GROUP: ${{ vars.CONTAINER_GROUP || github.repository_owner }}
+  IMAGE_NAME: mini-amaru
+  # Unique per run so a manifest cannot combine images from different builds.
+  IMAGE_BUILD_TAG: ${{ github.sha }}-${{ github.run_id }}
+  # Only pushes to main and release tags publish the image.
+  PUBLISH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Check formatting
+        run: make fmt-check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Clippy
+        run: make clippy
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: Test
+        run: make test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Lint and build the frontend
+        run: make web-check
+
+  version:
+    # A release tag must be equal to the package version in Cargo.toml.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      - name: The tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "mini-amaru") | .version')
+          if [ "$version" != "$TAG" ]; then
+            echo "Tag $TAG does not match the package version $version" >&2
+            exit 1
+          fi
+
+  image:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the base image
+        run: |
+          docker build -f Containerfile \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t localhost/mini-amaru:ci .
+      - name: Smoke-test the image
+        env:
+          RUNTIME: docker
+        run: scripts/test-image.sh localhost/mini-amaru:ci
+      # The architecture image waits under a run-specific tag. The manifest
+      # job publishes the final tags only after every check passes.
+      - name: Login to the registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the tested architecture image
+        if: env.PUBLISH == 'true'
+        run: |
+          image="$CONTAINER_REGISTRY/$CONTAINER_GROUP/$IMAGE_NAME:$IMAGE_BUILD_TAG-$IMAGE_ARCH"
+          docker tag localhost/mini-amaru:ci "$image"
+          docker push "$image"
+
+  image-manifest:
+    needs: [format, clippy, test, web, version, image]
+    # `version` runs only for tags, so accept it as skipped on main.
+    if: >-
+      !cancelled() &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) &&
+      needs.format.result == 'success' &&
+      needs.clippy.result == 'success' &&
+      needs.test.result == 'success' &&
+      needs.web.result == 'success' &&
+      needs.image.result == 'success' &&
+      (needs.version.result == 'success' || needs.version.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Login to the registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and push the multi-arch manifests
+        env:
+          # main: the commit SHA and `latest`. Release tag: the commit SHA
+          # and the version.
+          IMAGE_TAGS: ${{ github.sha }} ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'latest' }}
+        run: |
+          image="$CONTAINER_REGISTRY/$CONTAINER_GROUP/$IMAGE_NAME"
+          for tag in $IMAGE_TAGS; do
+            docker manifest create "$image:$tag" \
+              "$image:$IMAGE_BUILD_TAG-amd64" \
+              "$image:$IMAGE_BUILD_TAG-arm64"
+            docker manifest push "$image:$tag"
+          done

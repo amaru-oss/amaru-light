@@ -1,0 +1,5 @@
+[toolchain]
+# Keep this on the same release as the Rust stage of the Containerfile.
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

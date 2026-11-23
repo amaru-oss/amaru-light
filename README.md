@@ -256,6 +256,25 @@ to the URL the browser uses.
 
 See [docs/building-project-containers.md](docs/building-project-containers.md) for a full guide.
 
+### Pull the published image
+
+CI publishes the base image to the GitHub Container Registry as
+`ghcr.io/amaru-oss/mini-amaru`. Each tag is a multi-arch manifest for Linux
+x86-64 (`amd64`) and AArch64 (`arm64`):
+
+- `latest` and the full commit SHA, after a successful push to `main`.
+- The version, for example `0.1.0`, and the full commit SHA, after a
+  release tag.
+
+```sh
+podman pull ghcr.io/amaru-oss/mini-amaru:latest
+```
+
+To use the published image instead of a local build, replace
+`localhost/mini-amaru:latest` with `ghcr.io/amaru-oss/mini-amaru:latest` in the
+`FROM` line of a derived image. Run `make image-check` to build the image
+locally and run the same smoke test that CI runs.
+
 ## Data and configuration
 
 - `config/runtime.yaml`: SQLite, artifacts and retries.
@@ -278,11 +297,48 @@ The API has no authentication; keep the bind local and do not expose the port. T
 ## Development
 
 ```bash
-make check
-# cargo fmt --all -- --check
-# cargo clippy --locked --all-targets -- -D warnings
-# cargo test --locked
+make check        # cargo fmt --check, clippy -D warnings, cargo test
+make web-check    # npm ci, frontend build and oxlint
+make image-check  # build the base image and smoke-test it (podman or docker)
 ```
+
+`rust-toolchain.toml` pins the Rust release. Keep it on the same release as
+the Rust stage of the `Containerfile`. Run `make check` before you push. Run
+`make web-check` when you change `web/`, and `make image-check` when you
+change the `Containerfile` or `packaging/`.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on each pull request, each push to `main`
+and each release tag:
+
+- `make fmt-check`, `make clippy` and `make test`, the gates of `make check`.
+- `make web-check` for the frontend.
+- An image build from the `Containerfile` and `scripts/test-image.sh` on
+  `amd64` and `arm64`. The smoke test checks the tools in the image, the
+  runtime user, the ripwire skills, `/api/health`, `/api/jobs` and the
+  dashboard.
+
+After all checks pass, pushes to `main` and release tags publish the image
+([Pull the published image](#pull-the-published-image)). Pull requests do
+not publish. The optional repository variables `CONTAINER_REGISTRY` (default
+`ghcr.io`) and `CONTAINER_GROUP` (default the repository owner) change the
+image location.
+
+### Releases
+
+1. Set `version` in `Cargo.toml` to the release version, for example
+   `0.1.0`. Run `cargo check` so `Cargo.lock` agrees, and merge the change.
+2. Push a bare version tag on that commit:
+
+   ```sh
+   git tag 0.1.0
+   git push origin 0.1.0
+   ```
+
+CI runs all checks on the tag. It stops when the tag is not equal to the
+version in `Cargo.toml`. Then it publishes the image tags `<version>` and
+`<commit SHA>`.
 
 The tests use Rust, fake shell agents and temporary Git repositories. They need no Python, credentials or real agents. API/CLI tests run the binary; delivery tests cover worktrees, publishing, review, approval and resuming with a fake GitHub CLI.
 

@@ -26,6 +26,12 @@ includes the Amaru Light binary, dashboard, Git, GitHub CLI, and
 agents find relevant code with fewer tokens. The legacy image tag, launcher,
 and runtime username still use `mini-amaru`.
 
+Instead of a local build, you can pull the published base image,
+`ghcr.io/amaru-oss/mini-amaru:latest`, or a release version such as
+`ghcr.io/amaru-oss/mini-amaru:0.1.0`, and use it in the `FROM` line. CI
+publishes it for `amd64` and `arm64` after the checks pass on `main` and on
+release tags.
+
 The image entrypoint, `/app/entrypoint`, activates the ripwire skills for
 Claude Code and Codex in the runtime user's home at each start, then runs
 `/app/mini-amaru`. Keep that entrypoint in derived images so the skills
