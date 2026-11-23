@@ -1,4 +1,4 @@
-# IDs logicos usados pelo routing. O modelo concreto precisa existir no provider.
+# Logical IDs used by routing. The concrete model must exist in the provider.
 models:
   claude-haiku:
     provider: claude

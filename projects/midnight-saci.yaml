@@ -5,8 +5,8 @@ project:
 
 git:
   base_branch: main
-  branch_prefix: quick-fix          # so para itens sem issue; issues usam <prefixo>/<n>-<slug>
-  branch_prefixes:               # label -> prefixo (padrao: feat); ver delivery.md do Amaru §5
+  branch_prefix: quick-fix          # only for items without an issue; issues use <prefix>/<n>-<slug>
+  branch_prefixes:               # label -> prefix (default: feat); see Amaru's delivery.md §5
     bug: ci-issue
     documentation: docs
     migration-adr: docs
@@ -16,26 +16,26 @@ execution:
   max_parallel_agents: 1
   require_tests: true
   require_review: false
-  check_command: make check      # roda no worktree antes de abrir o PR; falha = sem PR
+  check_command: make check      # runs in the worktree before opening the PR; failure = no PR
   check_timeout_seconds: 1800
 
-# --- loop de entrega (cargo run -- loop ...) ---
+# --- delivery loop (cargo run -- loop ...) ---
 loop:
-  max_iterations: 20             # itens de trabalho por execucao do loop
+  max_iterations: 20             # work items per loop run
   max_tasks_per_item: 8
-  skip_labels: [owner-task, awaiting-owner-approval, milestone-exit]   # portoes humanos: nunca executados
-  create_integration_branch: true   # cria feat/<pai>-<slug> a partir da base se a sub-issue nao tiver
+  skip_labels: [owner-task, awaiting-owner-approval, milestone-exit]   # human gates: never executed
+  create_integration_branch: true   # creates feat/<parent>-<slug> from the base if the sub-issue has none
   worktrees_dir: data/worktrees
-  on_blocked: stop               # stop | brain (brain escolhe pular o item)
-  on_waiting: stop               # stop | continue (continuar mesmo com PR aguardando merge)
+  on_blocked: stop               # stop | brain (the brain chooses to skip the item)
+  on_waiting: stop               # stop | continue (continue even with a PR awaiting merge)
   brain_route: planning
 
 publish:
-  mode: auto                     # auto | manual (manual: para em WAITING_PR; a UI cria o PR)
+  mode: auto                     # auto | manual (manual: stops at WAITING_PR; the UI creates the PR)
 
 review:
-  enabled: true                  # agente revisor independente comenta no PR
-  max_rounds: 1                  # rodadas de correcao antes de BLOCKED
+  enabled: true                  # independent reviewer agent comments on the PR
+  max_rounds: 1                  # fix rounds before BLOCKED
 
 merge:
   mode: integration_only         # manual | integration_only | always
@@ -57,9 +57,9 @@ skills:
 
 github:
   cli: gh
-  # Se null, o runtime extrai "Milestone 5" do prompt.
+  # If null, the runtime extracts "Milestone 5" from the prompt.
   milestone: null
-  # Configure um numero OU um label exclusivo para issue de encerramento.
+  # Configure a number OR a dedicated label for the exit issue.
   exit_issue_number: null
   exit_issue_label: null
   publish_report: true

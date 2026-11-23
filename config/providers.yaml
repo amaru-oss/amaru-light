@@ -1,10 +1,10 @@
-# CLI providers recebem o prompt via stdin. Ajuste command/model conforme
-# a versao da CLI instalada. Placeholders: {model}.
+# CLI providers receive the prompt via stdin. Adjust command/model to match
+# the installed CLI version. Placeholders: {model}.
 providers:
   claude:
     enabled: true
     type: cli
-    # acceptEdits: sem isso o claude -p nao consegue editar arquivos em modo nao interativo.
+    # acceptEdits: without it, claude -p cannot edit files in non-interactive mode.
     command: ["claude", "-p", "--output-format", "text", "--model", "{model}", "--permission-mode", "acceptEdits"]
     models:
       - haiku
@@ -15,7 +15,7 @@ providers:
   codex:
     enabled: true
     type: cli
-    # CODEX_HOME e herdado do ambiente do processo Mini-Amaru.
+    # CODEX_HOME is inherited from the Mini-Amaru process environment.
     command: ["codex", "exec", "--approve-for-me", "--model", "{model}", "-"]
     models:
       - gpt-6.2-sol
@@ -27,7 +27,7 @@ providers:
   opencode:
     enabled: false
     type: cli
-    # Ajuste conforme a CLI e o provider configurados no seu ambiente.
+    # Adjust to match the CLI and provider configured in your environment.
     command: ["opencode", "run", "--model", "{model}"]
     models:
       - anthropic/claude-sonnet

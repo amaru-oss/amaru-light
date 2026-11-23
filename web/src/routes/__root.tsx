@@ -26,7 +26,7 @@ function RootLayout() {
             to="/new"
             className="text-sm text-muted-foreground hover:text-foreground [&.active]:font-medium [&.active]:text-foreground"
           >
-            Novo job
+            New job
           </Link>
         </nav>
       </header>

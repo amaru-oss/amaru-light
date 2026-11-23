@@ -1,88 +1,88 @@
 # Mini-Amaru
 
-Runtime local e experimental em **Rust** para coordenar agentes de engenharia via CLI. SQLite + YAML + Git/GitHub CLI. O frontend React/TypeScript permanece em `web/`. Não é necessário instalar Python.
+Experimental local runtime in **Rust** for coordinating engineering agents through their CLIs. SQLite + YAML + Git/GitHub CLI. The React/TypeScript frontend lives in `web/`. No Python installation is required.
 
-## Requisitos e instalação
+## Requirements and installation
 
-- Rust e Cargo (toolchain estável com suporte à edição 2024)
-- Git; GitHub CLI (`gh`) autenticado para milestones, issues e PRs
-- Pelo menos uma CLI de agente instalada e autenticada
-- Node.js/npm apenas para o frontend
+- Rust and Cargo (stable toolchain with support for the 2024 edition)
+- Git; GitHub CLI (`gh`) authenticated for milestones, issues and PRs
+- At least one agent CLI installed and authenticated
+- Node.js/npm, only for the frontend
 
 ```bash
 make install
-cp packaging/example.yaml projects/meu-projeto.yaml
+cp packaging/example.yaml projects/my-project.yaml
 ```
 
-O binário fica em `target/release/mini-amaru`. Use-o diretamente ou execute os atalhos `make`/`cargo run` abaixo.
+The binary is placed at `target/release/mini-amaru`. Use it directly or run the `make`/`cargo run` shortcuts below.
 
-## Pacote para outra máquina
+## Package for another machine
 
 ```bash
 make package
-# Opcional: outro target, com toolchain/linker já instalados:
+# Optional: another target, with the toolchain/linker already installed:
 make package TARGET=x86_64-unknown-linux-musl
 ```
 
-Gera `dist/mini-amaru-<versão>-<target>.tar.gz` e checksum SHA-256. O pacote inclui
-binário release, frontend compilado, configurações YAML, projetos, skills e
-instalador. Não inclui bancos, logs, credenciais, checkouts ou caches. O build
-precisa de Rust/Cargo e Node.js/npm; a máquina de destino não precisa deles.
-Cada pacote atende seu sistema operacional/arquitetura; cross-compilation exige
-as ferramentas do target. Um pacote macOS não roda no Linux. Linux GNU também
-exige glibc compatível com a máquina de build.
+This produces `dist/mini-amaru-<version>-<target>.tar.gz` and a SHA-256 checksum. The package includes
+the release binary, the compiled frontend, YAML configuration, projects, skills and
+the installer. It does not include databases, logs, credentials, checkouts or caches. The build
+needs Rust/Cargo and Node.js/npm; the target machine does not need them.
+Each package targets one operating system/architecture; cross-compilation requires
+the target's tools. A macOS package does not run on Linux. Linux GNU builds also
+require a glibc compatible with the build machine.
 
-Valide um pacote nativo com `scripts/test-package.sh dist/<arquivo>.tar.gz`.
+Validate a native package with `scripts/test-package.sh dist/<file>.tar.gz`.
 
-Copie o arquivo para a outra máquina, extraia e execute:
+Copy the file to the other machine, extract it and run:
 
 ```bash
-tar -xzf mini-amaru-<versão>-<target>.tar.gz
-cd mini-amaru-<versão>-<target>
+tar -xzf mini-amaru-<version>-<target>.tar.gz
+cd mini-amaru-<version>-<target>
 ./install.sh "$HOME/bot/mini-amaru"
 cd "$HOME/bot/mini-amaru"
-# Configure projects/example.yaml e config/providers.yaml.
+# Configure projects/example.yaml and config/providers.yaml.
 ./mini-amaru doctor
 ./mini-amaru serve
 ```
 
-Abra **http://127.0.0.1:8765**: o launcher do pacote serve a interface e a API na
-mesma porta. Git, `gh` e a CLI de agente escolhida devem estar instalados e
-autenticados no destino. O instalador usa um diretório gravável pelo usuário e
-recusa sobrescrever instalações existentes. Instruções completas, acesso via SSH
-e diagnóstico de permissões do SQLite estão em `INSTALL.md` dentro do pacote.
+Open **http://127.0.0.1:8765**: the package launcher serves the UI and the API on
+the same port. Git, `gh` and the chosen agent CLI must be installed and
+authenticated on the target. The installer uses a user-writable directory and
+refuses to overwrite existing installations. Full instructions, SSH access
+and SQLite permission troubleshooting are in `INSTALL.md` inside the package.
 
-Edite `projects/meu-projeto.yaml`: `project.root` aponta para o checkout do projeto (relativo ao arquivo YAML ou absoluto); `project.repository` é `owner/repo`; `models.allowed` limita modelos; `execution.check_command` define a validação. Os arquivos em `config/` selecionam providers, modelos, rotas, timeouts e armazenamento. Os comandos dos providers recebem o prompt em stdin e substituem `{model}`.
+Edit `projects/my-project.yaml`: `project.root` points to the project checkout (relative to the YAML file or absolute); `project.repository` is `owner/repo`; `models.allowed` restricts models; `execution.check_command` defines validation. The files in `config/` select providers, models, routes, timeouts and storage. Provider commands receive the prompt on stdin and substitute `{model}`.
 
-Os diretórios de banco, artefatos e worktrees são criados automaticamente.
-Ao iniciar um job ou loop, se `project.root` estiver ausente ou vazio e houver
-`project.repository`, o runtime clona esse repositório com `gh repo clone`.
-Autentique o `gh` como o usuário do serviço. Checkouts existentes com arquivos
-são preservados. Sem `project.repository`, um diretório ausente é criado como
-workspace vazio. `doctor` e `loop --dry-run` não clonam repositórios.
+The database, artifact and worktree directories are created automatically.
+When a job or loop starts, if `project.root` is missing or empty and
+`project.repository` is set, the runtime clones that repository with `gh repo clone`.
+Authenticate `gh` as the service user. Existing checkouts with files
+are preserved. Without `project.repository`, a missing directory is created as
+an empty workspace. `doctor` and `loop --dry-run` do not clone repositories.
 
 ```bash
-make doctor CONFIG=projects/meu-projeto.yaml
-make run CONFIG=projects/meu-projeto.yaml PROMPT='Implemente a funcionalidade X com testes.'
-make jobs CONFIG=projects/meu-projeto.yaml
-make status CONFIG=projects/meu-projeto.yaml JOB=1
+make doctor CONFIG=projects/my-project.yaml
+make run CONFIG=projects/my-project.yaml PROMPT='Implement feature X with tests.'
+make jobs CONFIG=projects/my-project.yaml
+make status CONFIG=projects/my-project.yaml JOB=1
 ```
 
-Equivalente via CLI:
+CLI equivalent:
 
 ```bash
-cargo run -- -c projects/meu-projeto.yaml run -p 'Implemente a funcionalidade X com testes.'
-cargo run -- -c projects/meu-projeto.yaml resume --job 1
+cargo run -- -c projects/my-project.yaml run -p 'Implement feature X with tests.'
+cargo run -- -c projects/my-project.yaml resume --job 1
 cargo run -- --help
 ```
 
-`-c/--config` pode aparecer antes ou depois do subcomando. `status` e `jobs` usam o banco da configuração selecionada.
+`-c/--config` can appear before or after the subcommand. `status` and `jobs` use the database of the selected configuration.
 
-## Dois modos de execução
+## Two execution modes
 
-**Job (`run`)**: o modelo de planejamento gera tarefas JSON. Cada tarefa roda em uma nova chamada ao provider, sequencialmente, com instruções e resumos recentes. O runtime registra tentativas, eventos, saída e relatório. Os agentes trabalham diretamente em `project.root` e recebem instruções para não fazer commit/push/merge. `resume` cria um novo job com o pedido original e instruções de continuação.
+**Job (`run`)**: the planning model generates JSON tasks. Each task runs in a new provider call, sequentially, with instructions and recent summaries. The runtime records attempts, events, output and a report. Agents work directly in `project.root` and are instructed not to commit/push/merge. `resume` creates a new job with the original request and continuation instructions.
 
-**Loop de entrega (`loop`)**: uma máquina de estados persistente observa o GitHub, escolhe trabalho elegível e coordena sua entrega:
+**Delivery loop (`loop`)**: a persistent state machine watches GitHub, picks eligible work and coordinates its delivery:
 
 ```text
 SYNC -> OBSERVE -> DECIDE -> WORK -> SYNC ...
@@ -90,81 +90,81 @@ SYNC -> OBSERVE -> DECIDE -> WORK -> SYNC ...
                          PREPARE -> EXECUTE -> VERIFY -> PUBLISH -> REVIEW -> MERGE
 ```
 
-O software valida as decisões do brain e usa fallback determinístico se o modelo retornar uma ação inválida ou estiver indisponível. Cada item vira um job filho em um worktree Git separado. Os agentes implementam e commitam; o runtime cria branches, executa a verificação, publica PRs, solicita review e aplica a política de merge.
+The software validates the brain's decisions and uses a deterministic fallback if the model returns an invalid action or is unavailable. Each item becomes a child job in a separate Git worktree. Agents implement and commit; the runtime creates branches, runs verification, publishes PRs, requests review and applies the merge policy.
 
-O loop respeita bloqueios e bloqueios herdados do pai, sub-issues, PRs abertos e labels de portão humano (`owner-task`, `awaiting-owner-approval`, `milestone-exit`). Sub-issues usam a branch de integração do pai. PRs parciais referenciam a issue; o fechamento exige conclusão declarada e as regras de integração. Um PR do pai para a branch principal continua sendo uma decisão humana.
+The loop respects blockers and blockers inherited from the parent, sub-issues, open PRs and human-gate labels (`owner-task`, `awaiting-owner-approval`, `milestone-exit`). Sub-issues use the parent's integration branch. Partial PRs reference the issue; closing it requires declared completion and the integration rules. A PR from the parent to the main branch remains a human decision.
 
 ```bash
-make loop-dry GOAL='Continue as tarefas da Milestone 5 ate concluir'
-make loop GOAL='Continue as tarefas da Milestone 5 ate concluir'
-cargo run -- loop -c projects/amaru.yaml --milestone 5 -p 'Continue a milestone'
+make loop-dry GOAL='Continue the Milestone 5 tasks until it is completed'
+make loop GOAL='Continue the Milestone 5 tasks until it is completed'
+cargo run -- loop -c projects/amaru.yaml --milestone 5 -p 'Continue the milestone'
 cargo run -- loop -c projects/amaru.yaml --resume 12
 ```
 
-`--dry-run` consulta o estado, sem agentes, worktrees, push ou PR. `Milestone N` tenta primeiro o título `M<N> ...`, antes do número interno do GitHub. Verifique a seleção no dry-run.
+`--dry-run` queries the state without agents, worktrees, push or PR. `Milestone N` first tries the title `M<N> ...`, before GitHub's internal number. Check the selection in the dry run.
 
-Políticas principais:
+Main policies:
 
-- `publish.mode`: `auto` ou `manual` (pausa antes da publicação).
-- `merge.mode`: `manual`, `integration_only` (padrão; só integração automática) ou `always`.
-- `review.enabled`, `review.max_rounds`: review independente e limite de correções.
-- `loop.max_iterations`, `loop.max_tasks_per_item`, `loop.max_passes_per_item`: limites de trabalho.
-- `loop.on_blocked`: `stop` ou `brain`; `loop.on_waiting`: `stop` ou `continue`.
+- `publish.mode`: `auto` or `manual` (pauses before publishing).
+- `merge.mode`: `manual`, `integration_only` (default; only integration is automatic) or `always`.
+- `review.enabled`, `review.max_rounds`: independent review and fix-round limit.
+- `loop.max_iterations`, `loop.max_tasks_per_item`, `loop.max_passes_per_item`: work limits.
+- `loop.on_blocked`: `stop` or `brain`; `loop.on_waiting`: `stop` or `continue`.
 
-Review e checks controlam o merge automático. A aprovação manual também exige que os checks não estejam pendentes ou falhando. O loop pode ser retomado no mesmo ID a partir de seu estado salvo. Cancelamento é cooperativo, verificado entre etapas; não interrompe imediatamente uma chamada de agente em andamento.
+Review and checks gate automatic merges. Manual approval also requires that checks are not pending or failing. The loop can be resumed under the same ID from its saved state. Cancellation is cooperative and checked between steps; it does not immediately interrupt an agent call in progress.
 
-### Contribuir por um fork
+### Contributing through a fork
 
-Crie o fork no GitHub e configure o YAML do projeto:
+Create the fork on GitHub and configure the project YAML:
 
 ```yaml
 project:
-  name: meu-projeto
-  repository: organizacao/meu-projeto
-  root: ../repos/meu-projeto
+  name: my-project
+  repository: organization/my-project
+  root: ../repos/my-project
 git:
   base_branch: main
-  fork_repository: meu-usuario/meu-projeto
+  fork_repository: my-user/my-project
 ```
 
-Mantenha `origin` apontando para o repositório upstream. Se o checkout ainda
-não existir, o runtime clona `project.repository` no primeiro uso. A conta
-do `gh` precisa poder acessar upstream, publicar branches no fork e abrir
-PRs em upstream. Execute `gh auth setup-git` na máquina ou no container
-que executa o loop para autenticar o push HTTPS.
+Keep `origin` pointing to the upstream repository. If the checkout does not
+exist yet, the runtime clones `project.repository` on first use. The `gh`
+account must be able to access upstream, push branches to the fork and open
+PRs on upstream. Run `gh auth setup-git` on the machine or in the container
+that runs the loop to authenticate HTTPS pushes.
 
-No loop de entrega, as branches partem de upstream, o push vai para o fork
-e o PR é aberto em upstream. `publish.mode: manual` ainda permite revisar o
-trabalho antes de publicar. Um mantenedor faz o merge no GitHub e o loop
-reconcilia o resultado na próxima sincronização. Se uma sub-issue exigir
-uma branch de integração que ainda não existe, peça a um mantenedor para
-criá-la em upstream. Sem `git.fork_repository`, o fluxo usa `origin`
-também para publicação.
+In the delivery loop, branches start from upstream, pushes go to the fork
+and the PR is opened on upstream. `publish.mode: manual` still lets you review the
+work before publishing. A maintainer merges on GitHub and the loop
+reconciles the result on the next sync. If a sub-issue requires
+an integration branch that does not exist yet, ask a maintainer to
+create it on upstream. Without `git.fork_repository`, the flow uses `origin`
+for publishing as well.
 
-## API local e frontend
+## Local API and frontend
 
 ```bash
-make serve CONFIG=projects/meu-projeto.yaml
-# Ou:
-cargo run -- -c projects/meu-projeto.yaml serve --port 9000 --cors-origin http://localhost:5173
+make serve CONFIG=projects/my-project.yaml
+# Or:
+cargo run -- -c projects/my-project.yaml serve --port 9000 --cors-origin http://localhost:5173
 ```
 
-O servidor escuta em `127.0.0.1:8765` por padrão, com um worker sequencial. As origens de browser são validadas no servidor; as origens padrão são `http://localhost:5173` e `http://127.0.0.1:5173`.
+The server listens on `127.0.0.1:8765` by default, with a single sequential worker. Browser origins are validated on the server; the default origins are `http://localhost:5173` and `http://127.0.0.1:5173`.
 
-| Método | Endpoint | Uso |
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| GET | `/api/health` | Saúde do serviço |
-| GET | `/api/jobs` | Jobs recentes |
-| POST | `/api/jobs` | `{ "prompt": "...", "mode": "job" ou "loop", "milestone": "5" }` |
-| GET | `/api/jobs/<id>` | Job, tarefas, itens filhos e ações disponíveis |
-| GET | `/api/jobs/<id>/events?after=0` | Eventos incrementais |
-| GET | `/api/jobs/<id>/log?offset=0` | Saída incremental `{text, offset, size}` |
-| POST | `/api/jobs/<id>/resume` | Continua loop ou cria job de continuação |
-| POST | `/api/jobs/<id>/cancel` | Solicita cancelamento do loop |
-| POST | `/api/jobs/<id>/pr` | Publica PR de item pronto |
-| POST | `/api/jobs/<id>/approve` | Aprova e faz merge do PR |
+| GET | `/api/health` | Service health |
+| GET | `/api/jobs` | Recent jobs |
+| POST | `/api/jobs` | `{ "prompt": "...", "mode": "job" or "loop", "milestone": "5" }` |
+| GET | `/api/jobs/<id>` | Job, tasks, child items and available actions |
+| GET | `/api/jobs/<id>/events?after=0` | Incremental events |
+| GET | `/api/jobs/<id>/log?offset=0` | Incremental output `{text, offset, size}` |
+| POST | `/api/jobs/<id>/resume` | Continues a loop or creates a continuation job |
+| POST | `/api/jobs/<id>/cancel` | Requests loop cancellation |
+| POST | `/api/jobs/<id>/pr` | Publishes the PR of a ready item |
+| POST | `/api/jobs/<id>/approve` | Approves and merges the PR |
 
-A criação exige `Content-Type: application/json`; o corpo tem limite de 64 KiB e o prompt de 20.000 caracteres. O frontend existente consome a mesma API:
+Creation requires `Content-Type: application/json`; the body is limited to 64 KiB and the prompt to 20,000 characters. The existing frontend consumes the same API:
 
 ```bash
 cd web
@@ -172,47 +172,47 @@ npm install
 npm run dev
 ```
 
-A interface oferece dashboard, lista de execuções, formulário de objetivo, detalhes, tarefas, logs/eventos, publicação de PR, aprovação e retomada. `VITE_API_URL` substitui a URL padrão da API. Veja `web/README.md`.
+The UI offers a dashboard, a list of runs, a goal form, details, tasks, logs/events, PR publishing, approval and resuming. `VITE_API_URL` overrides the default API URL. See `web/README.md`.
 
-Para servir o frontend compilado pelo próprio binário: `VITE_API_URL='' npm --prefix web run build`
-e `cargo run -- -c projects/meu-projeto.yaml serve --web-dir web/dist`.
+To serve the compiled frontend from the binary itself: `VITE_API_URL='' npm --prefix web run build`
+and `cargo run -- -c projects/my-project.yaml serve --web-dir web/dist`.
 
 ## Podman
 
-Em macOS, inicie a VM com `podman machine start` (use `podman machine init`
-primeiro se ainda não tiver uma VM). Na raiz do projeto, rode `make image`.
-A imagem base `localhost/mini-amaru:latest` usa Fedora Minimal 45 e inclui o
-binário Linux, o dashboard, Git e `gh`. Crie uma imagem derivada para cada
-projeto, com a CLI do agente e as ferramentas exigidas pelo build e pelos testes.
+On macOS, start the VM with `podman machine start` (run `podman machine init`
+first if you do not have a VM yet). From the project root, run `make image`.
+The base image `localhost/mini-amaru:latest` uses Fedora Minimal 45 and includes the
+Linux binary, the dashboard, Git and `gh`. Build a derived image for each
+project, with the agent CLI and the tools required by the build and tests.
 
-Por exemplo, se seu projeto usa Go e você já tem uma CLI de agente compatível
-com Linux, salve um `Containerfile.projeto` no seu contexto de build:
+For example, if your project uses Go and you already have a Linux-compatible
+agent CLI, save a `Containerfile.project` in your build context:
 
 ```dockerfile
 FROM localhost/mini-amaru:latest
 USER root
 RUN microdnf install -y golang make && microdnf clean all
-COPY --chmod=755 meu-agente /usr/local/bin/meu-agente
+COPY --chmod=755 my-agent /usr/local/bin/my-agent
 COPY providers.yaml /app/config/providers.yaml
 COPY models.yaml /app/config/models.yaml
 COPY routing.yaml /app/config/routing.yaml
-COPY projeto.yaml /app/projects/projeto.yaml
+COPY project.yaml /app/projects/project.yaml
 USER mini-amaru
 ```
 
-Use os YAMLs em `config/` e `packaging/example.yaml` como referência.
-Configure o comando do agente em `providers.yaml` para receber o prompt pelo
-stdin e emitir a resposta pelo stdout. Os IDs em `routing.yaml` precisam
-existir em `models.yaml` e ser permitidos pelo projeto. Configure
-`project.root: ../repos/meu-projeto` e o comando de checks do projeto no
-`projeto.yaml`. Mantenha credenciais fora do contexto de build.
+Use the YAML files in `config/` and `packaging/example.yaml` as a reference.
+Configure the agent command in `providers.yaml` to receive the prompt on
+stdin and write the response to stdout. The IDs in `routing.yaml` must
+exist in `models.yaml` and be allowed by the project. Set
+`project.root: ../repos/my-project` and the project's check command in
+`project.yaml`. Keep credentials out of the build context.
 
 ```sh
-podman build -f Containerfile.projeto -t localhost/mini-amaru-projeto:latest .
+podman build -f Containerfile.project -t localhost/mini-amaru-project:latest .
 ```
 
-Use volumes nomeados para persistir jobs, worktrees, checkouts e a configuração
-da conta do container.
+Use named volumes to persist jobs, worktrees, checkouts and the container
+account's configuration.
 
 ```sh
 podman run -d --name mini-amaru \
@@ -220,50 +220,52 @@ podman run -d --name mini-amaru \
   -v mini-amaru-data:/app/data:U \
   -v mini-amaru-repos:/app/repos:U \
   -v mini-amaru-home:/home/mini-amaru:U \
-  localhost/mini-amaru-projeto:latest \
-  serve -c projects/projeto.yaml --host 0.0.0.0 \
+  localhost/mini-amaru-project:latest \
+  serve -c projects/project.yaml --host 0.0.0.0 \
   --cors-origin http://127.0.0.1:8765 --cors-origin http://localhost:8765
 ```
 
-Abra **http://127.0.0.1:8765** na máquina onde o Podman publica a porta.
-Antes do primeiro job, autentique o agente instalado na imagem derivada e o
-`gh` dentro do container. A configuração no diretório pessoal persiste no
-volume `mini-amaru-home`.
+Open **http://127.0.0.1:8765** on the machine where Podman publishes the port.
+Before the first job, authenticate the agent installed in the derived image and
+`gh` inside the container. The configuration in the home directory persists in
+the `mini-amaru-home` volume.
 
 ```sh
 podman exec -it mini-amaru gh auth login --hostname github.com --git-protocol https --web
 podman exec mini-amaru gh auth setup-git
-podman exec mini-amaru /app/mini-amaru doctor -c projects/projeto.yaml
+podman exec mini-amaru /app/mini-amaru doctor -c projects/project.yaml
 ```
 
-Configure `git config --global user.name` e `user.email` dentro do container
-se os agentes precisarem criar commits. Para outro projeto, monte a configuração
-com `-v "$PWD/projects:/app/projects:ro,Z"` e selecione o YAML com `-c`. Use um
-caminho relativo como `../repos/meu-projeto` no YAML. O primeiro job pode clonar
-o repositório no volume com a autenticação do `gh`. Em hosts com SELinux, use
-`:Z` para rotular os bind mounts. Se mudar a porta publicada, ajuste as origens
-para a URL que o navegador usa.
+Set `git config --global user.name` and `user.email` inside the container
+if the agents need to create commits. For another project, mount the configuration
+with `-v "$PWD/projects:/app/projects:ro,Z"` and select the YAML with `-c`. Use a
+relative path such as `../repos/my-project` in the YAML. The first job can clone
+the repository into the volume using `gh` authentication. On SELinux hosts, use
+`:Z` to label the bind mounts. If you change the published port, adjust the origins
+to the URL the browser uses.
 
-## Dados e configuração
+See [docs/building-project-containers.md](docs/building-project-containers.md) for a full guide.
 
-- `config/runtime.yaml`: SQLite, artefatos e retries.
-- `config/providers.yaml`: CLIs e endpoint Ollama (`/api/generate`).
-- `config/models.yaml`: IDs lógicos de modelos.
-- `config/routing.yaml`: modelo por tipo de tarefa e fallback de disponibilidade.
-- `projects/*.yaml`: checkout, políticas e limites por projeto.
-- `skills/`: instruções adicionadas aos prompts.
-- `data/mini-amaru.db`: jobs, tarefas, tentativas, eventos, artefatos e estado do loop.
-- `data/artifacts/`: planos, snapshots GitHub, relatórios e logs.
+## Data and configuration
 
-O esquema SQLite e as configurações YAML existentes são preservados. Bancos da versão anterior são migrados adicionando metadados ausentes; faça uma cópia antes da primeira execução da nova versão. Jobs que estavam RUNNING/QUEUED na inicialização do servidor viram INTERRUPTED.
+- `config/runtime.yaml`: SQLite, artifacts and retries.
+- `config/providers.yaml`: CLIs and the Ollama endpoint (`/api/generate`).
+- `config/models.yaml`: logical model IDs.
+- `config/routing.yaml`: model per task type and availability fallback.
+- `projects/*.yaml`: checkout, policies and limits per project.
+- `skills/`: instructions added to prompts.
+- `data/mini-amaru.db`: jobs, tasks, attempts, events, artifacts and loop state.
+- `data/artifacts/`: plans, GitHub snapshots, reports and logs.
 
-## Limites operacionais
+The SQLite schema and existing YAML configuration are preserved. Databases from the previous version are migrated by adding missing metadata; make a backup before the first run of the new version. Jobs that were RUNNING/QUEUED when the server starts become INTERRUPTED.
 
-Este runtime é experimental. Worktrees separam alterações, mas não são uma sandbox. Providers e verificações rodam com as permissões do usuário e podem herdar credenciais do ambiente. Restrições nos prompts dependem do comportamento da CLI; use um ambiente isolado e permissões limitadas para conteúdo não confiável.
+## Operational limits
 
-A API não tem autenticação; mantenha o bind local e não exponha a porta. O loop pode publicar e integrar alterações reais conforme a política. Comece com dry-run, `publish.mode: manual`, `merge.mode: manual` e limites baixos. O modo job confia no sucesso do processo do agente; um relatório não comprova correção do código.
+This runtime is experimental. Worktrees separate changes, but they are not a sandbox. Providers and checks run with the user's permissions and may inherit credentials from the environment. Restrictions in prompts depend on the CLI's behavior; use an isolated environment and limited permissions for untrusted content.
 
-## Desenvolvimento
+The API has no authentication; keep the bind local and do not expose the port. The loop can publish and integrate real changes according to the policy. Start with a dry run, `publish.mode: manual`, `merge.mode: manual` and low limits. Job mode trusts the agent process's success; a report does not prove the code is correct.
+
+## Development
 
 ```bash
 make check
@@ -272,8 +274,8 @@ make check
 # cargo test --locked
 ```
 
-Os testes usam Rust, agentes shell falsos e repositórios Git temporários. Não precisam de Python, credenciais ou agentes reais. Testes de API/CLI executam o binário; os testes de entrega cobrem worktrees, publicação, review, aprovação e retomada com um GitHub CLI falso.
+The tests use Rust, fake shell agents and temporary Git repositories. They need no Python, credentials or real agents. API/CLI tests run the binary; delivery tests cover worktrees, publishing, review, approval and resuming with a fake GitHub CLI.
 
-Estrutura Rust: `src/main.rs` (CLI), `server.rs` (HTTP), `engine.rs`/`providers.rs`/`runtime.rs` (execução), `delivery.rs` (loop e itens), `github.rs`/`gitops.rs`/`sources.rs`/`policy.rs` (integração e regras), `storage.rs`/`config.rs`/`joblog.rs` (infraestrutura).
+Rust layout: `src/main.rs` (CLI), `server.rs` (HTTP), `engine.rs`/`providers.rs`/`runtime.rs` (execution), `delivery.rs` (loop and items), `github.rs`/`gitops.rs`/`sources.rs`/`policy.rs` (integration and rules), `storage.rs`/`config.rs`/`joblog.rs` (infrastructure).
 
-Licença: uso experimental.
+License: experimental use.
