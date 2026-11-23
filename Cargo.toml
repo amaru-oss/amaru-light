@@ -3,6 +3,7 @@ name = "mini-amaru"
 version = "0.1.0"
 edition = "2024"
 description = "Local engineering agent runtime and delivery loop"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1"

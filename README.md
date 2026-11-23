@@ -344,4 +344,6 @@ The tests use Rust, fake shell agents and temporary Git repositories. They need 
 
 Rust layout: `src/main.rs` (CLI), `server.rs` (HTTP), `engine.rs`/`providers.rs`/`runtime.rs` (execution), `delivery.rs` (loop and items), `github.rs`/`gitops.rs`/`sources.rs`/`policy.rs` (integration and rules), `storage.rs`/`config.rs`/`joblog.rs` (infrastructure).
 
-License: experimental use.
+## License
+
+Amaru Light is licensed under the [Apache License, Version 2.0](LICENSE).
