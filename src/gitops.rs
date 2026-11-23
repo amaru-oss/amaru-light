@@ -116,8 +116,11 @@ impl Git {
         Ok(())
     }
     pub fn remote_branches(&self, pattern: &str) -> Result<Vec<String>> {
+        self.remote_branches_at("origin", pattern)
+    }
+    pub fn remote_branches_at(&self, remote: &str, pattern: &str) -> Result<Vec<String>> {
         Ok(self
-            .out(&["ls-remote", "--heads", "origin", pattern], None)?
+            .out(&["ls-remote", "--heads", remote, pattern], None)?
             .lines()
             .filter_map(|s| s.split_once("refs/heads/").map(|(_, s)| s.to_owned()))
             .collect())
@@ -134,9 +137,32 @@ impl Git {
         Ok(self.out(&["status", "--porcelain"], Some(cwd))?.is_empty())
     }
     pub fn push(&self, branch: &str, cwd: &Path) -> Result<()> {
+        self.push_branch(&["push", "-u", "origin"], branch, cwd)
+    }
+    pub fn push_to_fork(&self, fork_url: &str, branch: &str, cwd: &Path) -> Result<()> {
+        self.push_branch(&["push", fork_url], branch, cwd)
+    }
+    fn push_branch(&self, command: &[&str], branch: &str, cwd: &Path) -> Result<()> {
         let refs = format!("refs/heads/{branch}:refs/heads/{branch}");
-        self.run(&["push", "-u", "origin", &refs], Some(cwd), true)?;
+        let mut args = command.to_vec();
+        args.push(&refs);
+        self.run(&args, Some(cwd), true)?;
         Ok(())
+    }
+    pub fn has_local_branch(&self, branch: &str) -> Result<bool> {
+        Ok(self
+            .run(
+                &[
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    &format!("refs/heads/{branch}"),
+                ],
+                None,
+                false,
+            )?
+            .status
+            .success())
     }
     pub fn create_remote_branch(&self, branch: &str, from: &str) -> Result<()> {
         self.run(
@@ -157,20 +183,7 @@ impl Git {
             std::fs::create_dir_all(p)?;
         }
         let path = path.to_str().context("non-UTF8 worktree")?;
-        if self
-            .run(
-                &[
-                    "show-ref",
-                    "--verify",
-                    "--quiet",
-                    &format!("refs/heads/{branch}"),
-                ],
-                None,
-                false,
-            )?
-            .status
-            .success()
-        {
+        if self.has_local_branch(branch)? {
             self.run(&["worktree", "add", path, branch], None, true)?;
         } else {
             let remote = format!("origin/{branch}");

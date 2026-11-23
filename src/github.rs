@@ -222,8 +222,59 @@ impl GitHubClient {
             "--limit",
             "300",
             "--json",
-            "number,title,state,baseRefName,headRefName,url,mergedAt",
+            "number,title,state,baseRefName,headRefName,headRepository,url,mergedAt",
         ])
+    }
+    pub fn verify_fork(&self, repository: &str) -> Result<()> {
+        let fork = self.json(&["api", &format!("repos/{repository}")])?;
+        let upstream = self.repository.trim_end_matches('/');
+        if fork["fork"] != true
+            || !fork["parent"]["full_name"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case(upstream))
+        {
+            bail!("{repository} is not a GitHub fork of {upstream}");
+        }
+        Ok(())
+    }
+    pub fn fork_pr_for_head(
+        &self,
+        repository: &str,
+        branch: &str,
+        base: &str,
+    ) -> Result<Option<Value>> {
+        let (owner, _) = repository
+            .split_once('/')
+            .context("invalid fork repository")?;
+        let pulls = self.array(&[
+            "api",
+            "--method",
+            "GET",
+            &format!("repos/{}/pulls", self.repository.trim_end_matches('/')),
+            "-f",
+            "state=all",
+            "-f",
+            &format!("head={owner}:{branch}"),
+            "-f",
+            &format!("base={base}"),
+        ])?;
+        Ok(pulls
+            .into_iter()
+            .filter(|pr| {
+                pr["head"]["repo"]["full_name"]
+                    .as_str()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(repository))
+                    && pr["head"]["ref"] == branch
+                    && pr["base"]["ref"] == base
+                    && (pr["state"] == "open" || !pr["merged_at"].is_null())
+            })
+            .min_by_key(|pr| pr["state"] != "open")
+            .map(|pr| {
+                json!({
+                    "number":pr["number"],"url":pr["html_url"],
+                    "state":if pr["state"]=="open" {"OPEN"} else {"MERGED"}
+                })
+            }))
     }
     pub fn pr_for_head(&self, branch: &str) -> Result<Option<Value>> {
         let prs = self.array(&[
@@ -306,6 +357,36 @@ impl GitHubClient {
             title,
             "--body",
             body,
+        ])
+    }
+    pub fn create_fork_pr(
+        &self,
+        base: &str,
+        repository: &str,
+        branch: &str,
+        title: &str,
+        body: &str,
+    ) -> Result<String> {
+        let (owner, name) = repository
+            .split_once('/')
+            .context("invalid fork repository")?;
+        self.run(&[
+            "api",
+            "--method",
+            "POST",
+            &format!("repos/{}/pulls", self.repository.trim_end_matches('/')),
+            "-f",
+            &format!("base={base}"),
+            "-f",
+            &format!("head={owner}:{branch}"),
+            "-f",
+            &format!("head_repo={name}"),
+            "-f",
+            &format!("title={title}"),
+            "-f",
+            &format!("body={body}"),
+            "--jq",
+            ".html_url",
         ])
     }
     pub fn pr_comment(&self, n: i64, body: &str) -> Result<String> {

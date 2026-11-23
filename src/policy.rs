@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Clone, Debug)]
 pub struct Policy {
     pub base_branch: String,
+    pub fork_repository: Option<String>,
     pub free_prefix: String,
     pub prefixes: Value,
     pub max_iterations: u64,
@@ -27,6 +28,33 @@ pub struct Policy {
 fn s(v: &Value, k: &str, d: &str) -> String {
     v[k].as_str().unwrap_or(d).into()
 }
+fn fork_repository(value: &Value, upstream: Option<&str>) -> Result<Option<String>> {
+    let fork_repository = match value {
+        Value::Null => None,
+        Value::String(repo)
+            if repo.split_once('/').is_some_and(|(owner, name)| {
+                [owner, name].iter().all(|part| {
+                    !part.is_empty()
+                        && *part != "."
+                        && *part != ".."
+                        && part
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+                })
+            }) =>
+        {
+            Some(repo.clone())
+        }
+        _ => bail!("git.fork_repository must be a GitHub owner/repository"),
+    };
+    if let Some(fork) = &fork_repository
+        && upstream
+            .is_some_and(|upstream| fork.eq_ignore_ascii_case(upstream.trim_end_matches('/')))
+    {
+        bail!("git.fork_repository must differ from project.repository");
+    }
+    Ok(fork_repository)
+}
 impl Policy {
     pub fn new(settings: &Settings) -> Result<Self> {
         let p = &settings.project;
@@ -34,8 +62,11 @@ impl Policy {
         let l = &p["loop"];
         let r = &p["review"];
         let m = &p["merge"];
+        let fork_repository =
+            fork_repository(&g["fork_repository"], p["project"]["repository"].as_str())?;
         let policy = Self {
             base_branch: s(g, "base_branch", "main"),
+            fork_repository,
             free_prefix: s(g, "branch_prefix", "amaru/"),
             prefixes: g["branch_prefixes"].clone(),
             max_iterations: l["max_iterations"].as_u64().unwrap_or(20),
@@ -89,7 +120,8 @@ impl Policy {
         Ok(policy)
     }
     pub fn can_auto_merge(&self, base: &str) -> bool {
-        self.merge_mode == "always"
-            || (self.merge_mode == "integration_only" && base != self.base_branch)
+        self.fork_repository.is_none()
+            && (self.merge_mode == "always"
+                || (self.merge_mode == "integration_only" && base != self.base_branch))
     }
 }
