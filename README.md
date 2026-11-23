@@ -113,6 +113,34 @@ Políticas principais:
 
 Review e checks controlam o merge automático. A aprovação manual também exige que os checks não estejam pendentes ou falhando. O loop pode ser retomado no mesmo ID a partir de seu estado salvo. Cancelamento é cooperativo, verificado entre etapas; não interrompe imediatamente uma chamada de agente em andamento.
 
+### Contribuir por um fork
+
+Crie o fork no GitHub e configure o YAML do projeto:
+
+```yaml
+project:
+  name: meu-projeto
+  repository: organizacao/meu-projeto
+  root: ../repos/meu-projeto
+git:
+  base_branch: main
+  fork_repository: meu-usuario/meu-projeto
+```
+
+Mantenha `origin` apontando para o repositório upstream. Se o checkout ainda
+não existir, o runtime clona `project.repository` no primeiro uso. A conta
+do `gh` precisa poder acessar upstream, publicar branches no fork e abrir
+PRs em upstream. Execute `gh auth setup-git` na máquina ou no container
+que executa o loop para autenticar o push HTTPS.
+
+No loop de entrega, as branches partem de upstream, o push vai para o fork
+e o PR é aberto em upstream. `publish.mode: manual` ainda permite revisar o
+trabalho antes de publicar. Um mantenedor faz o merge no GitHub e o loop
+reconcilia o resultado na próxima sincronização. Se uma sub-issue exigir
+uma branch de integração que ainda não existe, peça a um mantenedor para
+criá-la em upstream. Sem `git.fork_repository`, o fluxo usa `origin`
+também para publicação.
+
 ## API local e frontend
 
 ```bash

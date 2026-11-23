@@ -26,10 +26,17 @@ fn number(v: &Value, k: &str) -> i64 {
 }
 fn state_data(store: &Store, id: i64) -> Result<Value> {
     let row = store.job(id)?.context("job missing")?;
-    Ok(row["state_data"]
+    Ok(job_state_data(&row))
+}
+fn job_state_data(row: &Value) -> Value {
+    row["state_data"]
         .as_str()
         .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_else(|| json!({})))
+        .unwrap_or_else(|| json!({}))
+}
+pub(crate) fn requires_upstream_merge(settings: &Settings, job: &Value) -> bool {
+    !settings.project["git"]["fork_repository"].is_null()
+        || !job_state_data(job)["fork_repository"].is_null()
 }
 fn save_data(store: &Store, id: i64, data: &Value) -> Result<()> {
     store.set_meta(id, &json!({"state_data":data}))
@@ -82,8 +89,13 @@ fn preview_base(git: &Git, policy: &Policy, item: &Value) -> Result<String> {
     let mut found = git.remote_branches(&format!("refs/heads/*/{parent}-*"))?;
     found.sort();
     Ok(found.into_iter().next().unwrap_or_else(|| {
+        let action = if policy.fork_repository.is_some() || !policy.create_integration {
+            "requires upstream branch"
+        } else {
+            "would create"
+        };
         format!(
-            "(would create feat/{parent}-{})",
+            "({action} feat/{parent}-{})",
             slugify(item["parent_title"].as_str().unwrap_or("integration"), 40)
         )
     }))
@@ -173,15 +185,22 @@ impl<'a> Work<'a> {
         id: i64,
         loop_id: Option<i64>,
     ) -> Result<Self> {
+        let policy = Policy::new(settings)?;
+        let data = state_data(store, id)?;
+        if data["fork_repository"] != json!(policy.fork_repository) {
+            bail!(
+                "The work item's fork repository differs from git.fork_repository. Restore its original configuration or start a new loop"
+            );
+        }
         Ok(Self {
             settings,
             store,
             id,
             loop_id,
-            policy: Policy::new(settings)?,
+            policy,
             git: Git::new(&settings.project_root()),
             gh: github(settings)?,
-            data: state_data(store, id)?,
+            data,
         })
     }
     fn save(&self) -> Result<()> {
@@ -243,6 +262,42 @@ impl<'a> Work<'a> {
         }
         Ok(())
     }
+    fn work_branch(&self, item: &Value) -> Result<String> {
+        let mut branch = item["branch"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                format!(
+                    "{}{}",
+                    self.policy.free_prefix,
+                    slugify(s(item, "title"), 40)
+                )
+            });
+        if let Some(fork) = self.policy.fork_repository.as_deref() {
+            self.gh.verify_fork(fork)?;
+            if let Some(saved) = self.data["branch"].as_str() {
+                branch = saved.to_owned();
+            } else {
+                let fork_url = format!("https://github.com/{fork}.git");
+                let stem = branch.clone();
+                let mut suffix = 2;
+                while self.git.has_local_branch(&branch)?
+                    || !self
+                        .git
+                        .remote_branches(&format!("refs/heads/{branch}"))?
+                        .is_empty()
+                    || !self
+                        .git
+                        .remote_branches_at(&fork_url, &format!("refs/heads/{branch}"))?
+                        .is_empty()
+                {
+                    branch = format!("{stem}-{suffix}");
+                    suffix += 1;
+                }
+            }
+        }
+        Ok(branch)
+    }
     fn prepare(&mut self) -> Result<String> {
         if self.git.has_remote()? {
             self.git.fetch()?;
@@ -258,6 +313,11 @@ impl<'a> Work<'a> {
             if let Some(found) = found.into_iter().next() {
                 found
             } else {
+                if self.policy.fork_repository.is_some() {
+                    bail!(
+                        "BLOCKED: ask an upstream maintainer to create the integration branch for issue #{parent}"
+                    );
+                }
                 if !self.policy.create_integration {
                     bail!("BLOCKED: parent integration branch missing");
                 }
@@ -278,16 +338,7 @@ impl<'a> Work<'a> {
         } else {
             self.policy.base_branch.clone()
         };
-        let branch = item["branch"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                format!(
-                    "{}{}",
-                    self.policy.free_prefix,
-                    slugify(s(item, "title"), 40)
-                )
-            });
+        let branch = self.work_branch(item)?;
         let root = self.settings.project_root();
         let repo = root.file_name().and_then(|s| s.to_str()).unwrap_or("repo");
         let wt = self
@@ -426,12 +477,18 @@ impl<'a> Work<'a> {
     }
     fn publish(&mut self) -> Result<String> {
         let wt = self.wt();
-        self.git.push(s(&self.data, "branch"), &wt)?;
-        if let Some(pr) = self
-            .gh
-            .pr_for_head(s(&self.data, "branch"))?
-            .filter(|p| p["state"] == "OPEN" || p["state"] == "MERGED")
-        {
+        let branch = s(&self.data, "branch");
+        let base = s(&self.data, "base");
+        if let Some(fork) = self.policy.fork_repository.as_deref() {
+            self.gh.verify_fork(fork)?;
+        }
+        self.push_branch(&wt)?;
+        let existing = if let Some(fork) = self.policy.fork_repository.as_deref() {
+            self.gh.fork_pr_for_head(fork, branch, base)?
+        } else {
+            self.gh.pr_for_head(branch)?
+        };
+        if let Some(pr) = existing.filter(|p| p["state"] == "OPEN" || p["state"] == "MERGED") {
             self.data["pr"] =
                 json!({"number":pr["number"],"url":pr["url"],"merged":pr["state"]=="MERGED"});
         } else {
@@ -461,12 +518,14 @@ impl<'a> Work<'a> {
                 s(&meta, "integration"),
                 self.id
             );
-            let output = self.gh.create_pr(
-                s(&self.data, "base"),
-                s(&self.data, "branch"),
-                s(&meta, "title"),
-                &body,
-            )?;
+            let title = s(&meta, "title");
+            let base = s(&self.data, "base");
+            let branch = s(&self.data, "branch");
+            let output = if let Some(fork) = self.policy.fork_repository.as_deref() {
+                self.gh.create_fork_pr(base, fork, branch, title, &body)?
+            } else {
+                self.gh.create_pr(base, branch, title, &body)?
+            };
             let url = output.lines().last().context("empty PR URL")?.trim();
             let n: i64 = url
                 .trim_end_matches('/')
@@ -575,9 +634,18 @@ impl<'a> Work<'a> {
             }
             self.data["check"] = check;
         }
-        self.git.push(s(&self.data, "branch"), &self.wt())?;
+        self.push_branch(&self.wt())?;
         self.save()?;
         Ok("REVIEW".into())
+    }
+    fn push_branch(&self, worktree: &Path) -> Result<()> {
+        let branch = s(&self.data, "branch");
+        if let Some(fork) = self.policy.fork_repository.as_deref() {
+            self.git
+                .push_to_fork(&format!("https://github.com/{fork}.git"), branch, worktree)
+        } else {
+            self.git.push(branch, worktree)
+        }
     }
     fn merge(&mut self) -> Result<String> {
         let n = number(&self.data["pr"], "number");
@@ -608,7 +676,8 @@ impl<'a> Work<'a> {
             &json!({"pr":self.data["pr"]["url"],"base":self.data["base"]}),
         )?;
         if merged {
-            if should_close(&self.data, s(&self.data, "base"), &self.policy.base_branch)
+            if self.policy.fork_repository.is_none()
+                && should_close(&self.data, s(&self.data, "base"), &self.policy.base_branch)
                 && let Err(e) = self.gh.close_issue(
                     number(&self.data["item"], "number"),
                     &format!(
@@ -767,7 +836,10 @@ impl<'a> DeliveryLoop<'a> {
             match s(&pr, "state") {
                 "MERGED" => {
                     let d = state_data(self.store, cid)?;
-                    if should_close(&d, s(&child, "base_branch"), &self.policy.base_branch) {
+                    if self.policy.fork_repository.is_none()
+                        && d["fork_repository"].is_null()
+                        && should_close(&d, s(&child, "base_branch"), &self.policy.base_branch)
+                    {
                         let _ = self.gh.close_issue(
                             number(&child, "issue_number"),
                             &format!(
@@ -1021,7 +1093,7 @@ impl<'a> DeliveryLoop<'a> {
                 "work",
                 Some(self.id),
             )?;
-            self.store.set_meta(cid,&json!({"ref":rf,"issue_number":item["number"],"state":"PREPARE","state_data":{"item":item}}))?;
+            self.store.set_meta(cid,&json!({"ref":rf,"issue_number":item["number"],"state":"PREPARE","state_data":{"item":item,"fork_repository":self.policy.fork_repository}}))?;
             let row = self.store.job(self.id)?.context("loop missing")?;
             self.store
                 .set_meta(self.id, &json!({"iteration":number(&row,"iteration")+1}))?;
@@ -1197,6 +1269,10 @@ pub fn approve_pr(settings: &Settings, job_id: i64) -> Result<()> {
         bail!("job is {}", s(&job, "status"));
     }
     let policy = Policy::new(settings)?;
+    let data = state_data(&store, job_id)?;
+    if requires_upstream_merge(settings, &job) {
+        bail!("Fork PRs must be merged by an upstream maintainer on GitHub");
+    }
     let gh = github(settings)?;
     let n = number(&job, "pr_number");
     let pr = gh.pr_view(n)?;
@@ -1210,11 +1286,7 @@ pub fn approve_pr(settings: &Settings, job_id: i64) -> Result<()> {
     gh.pr_comment(n, "Approved by a human via the Mini-Amaru UI.")?;
     gh.merge_pr(n, &policy.merge_method)?;
     if !job["issue_number"].is_null()
-        && should_close(
-            &state_data(&store, job_id)?,
-            s(&job, "base_branch"),
-            &policy.base_branch,
-        )
+        && should_close(&data, s(&job, "base_branch"), &policy.base_branch)
     {
         let _ = gh.close_issue(
             number(&job, "issue_number"),
@@ -1333,11 +1405,30 @@ case "$1 $2" in
  'api repos/o/r/milestones?state=all&per_page=100') printf '%s\n' '{"number":1,"title":"M1 Delivery"}';;
  'api repos/o/r/issues/1/dependencies/blocked_by'|'api repos/o/r/issues/1/sub_issues') printf '[]';;
  'api repos/o/r/issues/1/parent') printf 'HTTP 404 Not Found' >&2; exit 1;;
+ 'api repos/contributor/r') printf '{"fork":true,"parent":{"full_name":"o/r"}}';;
+ 'api --method')
+   case "$3 $4" in
+    'GET repos/o/r/pulls')
+      test "$8" = 'head=contributor:feat/1-delivery-test' && test "${10}" = 'base=main' || exit 3
+      if test -f "$state/published"; then
+        printf '[{"number":1,"state":"open","html_url":"https://github.com/o/r/pull/1","head":{"ref":"feat/1-delivery-test","repo":{"full_name":"contributor/r"}},"base":{"ref":"main"}}]'
+      else
+        printf '[{"number":9,"state":"open","html_url":"https://github.com/o/r/pull/9","head":{"ref":"feat/1-delivery-test","repo":{"full_name":"unrelated/r"}},"base":{"ref":"main"}}]'
+      fi;;
+    'POST repos/o/r/pulls')
+      test "$6" = 'base=main' && test "$8" = 'head=contributor:feat/1-delivery-test' && test "${10}" = 'head_repo=r' || exit 3
+      test ! -f "$state/published" || exit 4
+      touch "$state/published"; printf 'https://github.com/o/r/pull/1\n';;
+    *) exit 5;;
+   esac;;
  'issue list') if test -f "$state/merged"; then printf '[]'; else printf '[{"number":1,"title":"Delivery test","body":"Implement the thing.","state":"OPEN","url":"https://github.com/o/r/issues/1","labels":[]}]'; fi;;
  'pr list') if test -f "$state/published"; then
    if test -f "$state/merged"; then status=MERGED; else status=OPEN; fi
    for arg in "$@"; do if test "$arg" = merged && test "$status" = OPEN; then printf '[]'; exit 0; fi; done
    printf '[{"number":1,"title":"feat: delivery test","state":"%s","headRefName":"feat/1-delivery-test","baseRefName":"main","url":"https://github.com/o/r/pull/1"}]' "$status"
+  elif test -f "$state/other-fork"; then
+   for arg in "$@"; do if test "$arg" = merged; then printf '[]'; exit 0; fi; done
+   printf '[{"number":9,"title":"Unrelated","state":"OPEN","headRefName":"feat/1-delivery-test","headRepository":{"nameWithOwner":"unrelated/r"}}]'
   else printf '[]'; fi;;
  'pr create') touch "$state/published"; printf 'https://github.com/o/r/pull/1\n';;
  'pr view') if test -f "$state/merged"; then status=MERGED; else status=OPEN; fi; printf '{"number":1,"state":"%s","url":"https://github.com/o/r/pull/1"}' "$status";;
@@ -1419,5 +1510,55 @@ esac
         assert_eq!(child["review_verdict"], "REQUEST_CHANGES");
         assert!(!temp.path().join("merged").exists());
         assert_eq!(store.job(id).unwrap().unwrap()["status"], "BLOCKED");
+    }
+
+    #[test]
+    fn publishes_to_fork_and_waits_for_upstream_merge() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = fixture(temp.path(), "APPROVE");
+        settings.project["git"] = json!({"fork_repository":"contributor/r"});
+        settings.project["merge"]["mode"] = json!("always");
+        fs::write(temp.path().join("other-fork"), "").unwrap();
+        let fork = temp.path().join("fork.git");
+        sh(temp.path(), &["init", "--bare", fork.to_str().unwrap()]);
+        let checkout = settings.project_root();
+        sh(
+            &checkout,
+            &[
+                "config",
+                "--local",
+                &format!("url.{}.insteadOf", fork.display()),
+                "https://github.com/contributor/r.git",
+            ],
+        );
+
+        let id = run_loop(&settings, "Milestone 1", None, None).unwrap();
+        let store = Store::open(settings.db_path()).unwrap();
+        let child = store.children(id).unwrap().remove(0);
+        assert_eq!(child["status"], "WAITING_PR", "{child}");
+        let cid = number(&child, "id");
+        create_pr_now(&settings, cid).unwrap();
+        let child = store.job(cid).unwrap().unwrap();
+        assert_eq!(child["status"], "WAITING_MERGE", "{child}");
+        assert_eq!(child["pr_url"], "https://github.com/o/r/pull/1");
+        assert!(approve_pr(&settings, cid).is_err());
+        assert!(!temp.path().join("merged").exists());
+        let branch = "refs/heads/feat/1-delivery-test";
+        sh(&fork, &["show-ref", "--verify", branch]);
+        let upstream = Git::new(&checkout);
+        assert!(upstream.remote_branches(branch).unwrap().is_empty());
+
+        // Recover when GitHub created the PR before its number was saved locally.
+        store.set_job(cid, "WAITING_PR", None, None).unwrap();
+        store.set_meta(cid, &json!({"pr_number":null})).unwrap();
+        create_pr_now(&settings, cid).unwrap();
+        let child = store.job(cid).unwrap().unwrap();
+        assert_eq!(child["status"], "WAITING_MERGE", "{child}");
+        assert_eq!(child["pr_number"], 1);
+
+        fs::write(temp.path().join("merged"), "").unwrap();
+        run_loop(&settings, "Milestone 1", Some(id), None).unwrap();
+        assert_eq!(store.job(cid).unwrap().unwrap()["status"], "COMPLETED");
+        assert!(!temp.path().join("closed").exists());
     }
 }

@@ -77,7 +77,14 @@ pub fn observe(gh: &GitHubClient, selector: &str, policy: &Policy) -> Result<Val
     let milestone = GitHubClient::resolve_milestone(&gh.list_milestones()?, selector)?;
     let mut issues = gh.list_issues(milestone["title"].as_str().context("milestone title")?)?;
     issues.sort_by_key(|i| i["number"].as_i64().unwrap_or(0));
-    let prs = gh.all_prs()?;
+    let mut prs = gh.all_prs()?;
+    if let Some(fork) = policy.fork_repository.as_deref() {
+        prs.retain(|pr| {
+            pr["headRepository"]["nameWithOwner"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case(fork))
+        });
+    }
     let mut items = Vec::new();
     let mut closed = 0;
     let mut actionable = 0;

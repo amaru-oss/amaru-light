@@ -137,7 +137,11 @@ fn route(
     let action = parts.get(3).copied().unwrap_or("");
     match (method, action) {
         ("GET", "") => {
-            job["actions"] = actions(&job);
+            let mut available = actions(&job);
+            if delivery::requires_upstream_merge(settings, &job) {
+                available["approve"] = json!(false);
+            }
+            job["actions"] = available;
             job["tasks"] = json!(store.tasks(id)?);
             job["children"] = json!(store.children(id)?);
             Ok((200, job))
