@@ -182,8 +182,18 @@ and `cargo run -- -c projects/my-project.yaml serve --web-dir web/dist`.
 On macOS, start the VM with `podman machine start` (run `podman machine init`
 first if you do not have a VM yet). From the project root, run `make image`.
 The base image `localhost/mini-amaru:latest` uses Fedora Minimal 45 and includes the
-Linux binary, the dashboard, Git and `gh`. Build a derived image for each
-project, with the agent CLI and the tools required by the build and tests.
+Linux binary, the dashboard, Git, `gh` and [ripwire](https://github.com/redhat-et/ripwire).
+Build a derived image for each project, with the agent CLI and the tools
+required by the build and tests.
+
+ripwire is a code map tool that lets agents find the code for a task in few
+tokens. The `RIPWIRE_VERSION` build argument selects the release tag to build,
+for example `podman build --build-arg RIPWIRE_VERSION=v0.6.10 ...`.
+On x86-64 it needs a CPU with x86-64-v3 instructions (AVX2). At each start,
+the container entrypoint activates the ripwire skills for Claude Code
+(`~/.claude/skills`) and Codex (`~/.agents/skills`) in the runtime user's
+home, so they also reach a home directory mounted as a volume. Set
+`AMARU_RIPWIRE_SKILLS=0` to skip that step.
 
 For example, if your project uses Go and you already have a Linux-compatible
 agent CLI, save a `Containerfile.project` in your build context:
