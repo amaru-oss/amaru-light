@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 
-// API REST do `cargo run -- -c <config> serve` (padrao 127.0.0.1:8765).
+// REST API of `cargo run -- -c <config> serve` (default 127.0.0.1:8765).
 export const API_BASE: string =
   (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://127.0.0.1:8765'
 
@@ -18,7 +18,7 @@ export type JobStatus =
   | 'INTERRUPTED'
   | (string & {})
 
-// "Terminal" = o servidor nao esta mais executando nada; o job pode voltar a andar por acao humana.
+// "Terminal" = the server is no longer running anything; the job can move again through human action.
 export const TERMINAL_STATUSES: JobStatus[] = [
   'COMPLETED',
   'FAILED',
@@ -100,7 +100,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       headers: { Accept: 'application/json', ...(init?.headers ?? {}) },
     })
   } catch {
-    throw new ApiError(`API indisponivel em ${API_BASE}. Rode: make serve`, 0)
+    throw new ApiError(`API unavailable at ${API_BASE}. Run: make serve`, 0)
   }
   const body = await res.json().catch(() => null)
   if (!res.ok) {
@@ -136,14 +136,14 @@ export const createJob = ({
     body: JSON.stringify({ prompt, mode, ...(milestone?.trim() ? { milestone: milestone.trim() } : {}) }),
   })
 
-// Loop: o MESMO job continua (id igual). Job comum: cria um novo (resumed_from).
+// Loop: the SAME job continues (same id). Regular job: creates a new one (resumed_from).
 export const resumeJob = (id: number): Promise<{ id: number; resumed?: boolean; resumed_from?: number }> =>
   request(`/api/jobs/${id}/resume`, { method: 'POST' })
 
 export const cancelJob = (id: number): Promise<{ id: number }> =>
   request(`/api/jobs/${id}/cancel`, { method: 'POST' })
 
-// Acoes humanas sobre o PR de um item de trabalho.
+// Human actions on a work item's PR.
 export const createJobPr = (id: number): Promise<{ id: number }> =>
   request(`/api/jobs/${id}/pr`, { method: 'POST' })
 

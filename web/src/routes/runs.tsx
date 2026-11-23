@@ -39,7 +39,7 @@ const columns: ColumnDef<Job>[] = [
   },
   {
     accessorKey: 'kind',
-    header: 'Tipo',
+    header: 'Type',
     cell: ({ row }) => (
       <Badge variant="outline">
         {row.original.kind === 'work'
@@ -78,7 +78,7 @@ const columns: ColumnDef<Job>[] = [
         '—'
       ),
   },
-  { accessorKey: 'created_at', header: 'Criado em' },
+  { accessorKey: 'created_at', header: 'Created at' },
 ]
 
 function RunsPage() {
@@ -95,15 +95,15 @@ function RunsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Jobs</h1>
         <Link to="/new" className="text-sm font-medium underline-offset-4 hover:underline">
-          Novo job
+          New job
         </Link>
       </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando jobs…</p>}
+      {isLoading && <p className="text-sm text-muted-foreground">Loading jobs…</p>}
       {isError && <p className="text-sm text-destructive">{error.message}</p>}
 
       {!isLoading && !isError && data.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhum job ainda.</p>
+        <p className="text-sm text-muted-foreground">No jobs yet.</p>
       )}
 
       {!isLoading && !isError && data.length > 0 && (

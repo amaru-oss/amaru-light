@@ -4,7 +4,7 @@ PODMAN ?= podman
 IMAGE ?= localhost/mini-amaru:latest
 TARGET ?=
 CONFIG ?= projects/amaru.yaml
-PROMPT ?= Descreva aqui o objetivo
+PROMPT ?= Describe the goal here
 GOAL ?= Continue the work of Milestone 5 until it is completed.
 
 .PHONY: help install package image check doctor run resume status jobs serve loop loop-dry clean

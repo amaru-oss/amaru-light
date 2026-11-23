@@ -17,15 +17,15 @@ function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Visao geral dos jobs do mini-amaru.</p>
+        <p className="text-sm text-muted-foreground">Overview of mini-amaru jobs.</p>
       </div>
 
       {isError && <p className="text-sm text-destructive">{error.message}</p>}
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard title="Projetos" value={isLoading ? '…' : projects} description="Projetos com jobs" />
-        <StatCard title="Jobs" value={isLoading ? '…' : jobs.length} description="Jobs recentes" />
-        <StatCard title="Ativos" value={isLoading ? '…' : active} description="Na fila ou executando" />
+        <StatCard title="Projects" value={isLoading ? '…' : projects} description="Projects with jobs" />
+        <StatCard title="Jobs" value={isLoading ? '…' : jobs.length} description="Recent jobs" />
+        <StatCard title="Active" value={isLoading ? '…' : active} description="Queued or running" />
       </div>
     </div>
   )

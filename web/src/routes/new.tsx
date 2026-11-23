@@ -32,16 +32,16 @@ function NewJobPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">Novo job</h1>
+        <h1 className="text-2xl font-semibold">New job</h1>
         <p className="text-sm text-muted-foreground">
           {mode === 'job'
-            ? 'Job unico: planeja e executa as tarefas no checkout configurado, sem commit/push.'
-            : 'Loop de entrega: observa o GitHub, o brain escolhe o proximo item, um job por item em worktree proprio, com PR, review e merge conforme a politica do projeto.'}
+            ? 'Single job: plans and runs the tasks in the configured checkout, without commit/push.'
+            : 'Delivery loop: watches GitHub, the brain picks the next item, one job per item in its own worktree, with PR, review and merge according to the project policy.'}
         </p>
       </div>
 
       <form onSubmit={onSubmit} className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Modo">
+        <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Mode">
           <Button
             type="button"
             variant={mode === 'job' ? 'default' : 'outline'}
@@ -49,7 +49,7 @@ function NewJobPage() {
             role="radio"
             aria-checked={mode === 'job'}
           >
-            Job unico
+            Single job
           </Button>
           <Button
             type="button"
@@ -58,13 +58,13 @@ function NewJobPage() {
             role="radio"
             aria-checked={mode === 'loop'}
           >
-            Loop de entrega
+            Delivery loop
           </Button>
           {mode === 'loop' && (
             <input
               value={milestone}
               onChange={(e) => setMilestone(e.target.value)}
-              placeholder='Milestone (ex.: 5 = "M5 ...", ou titulo exato) — opcional'
+              placeholder='Milestone (e.g. 5 = "M5 ...", or exact title) — optional'
               className="min-w-64 flex-1 rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               maxLength={120}
             />
@@ -77,8 +77,8 @@ function NewJobPage() {
           maxLength={20000}
           placeholder={
             mode === 'loop'
-              ? 'Sincronize o repositorio, veja o ultimo PR mergeado e continue as tarefas da Milestone 5 ate concluir.'
-              : 'Analise o projeto e implemente a funcionalidade X com testes.'
+              ? 'Sync the repository, check the last merged PR and continue the Milestone 5 tasks until it is completed.'
+              : 'Analyze the project and implement feature X with tests.'
           }
           className="w-full rounded-md border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
           disabled={mutation.isPending}
@@ -87,7 +87,7 @@ function NewJobPage() {
         {mutation.isError && <p className="text-sm text-destructive">{mutation.error.message}</p>}
 
         <Button type="submit" disabled={mutation.isPending || !prompt.trim()}>
-          {mutation.isPending ? 'Enviando…' : 'Enviar'}
+          {mutation.isPending ? 'Submitting…' : 'Submit'}
         </Button>
       </form>
     </div>

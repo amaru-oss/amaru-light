@@ -31,7 +31,7 @@ export const Route = createFileRoute('/jobs/$jobId')({
   component: JobPage,
 })
 
-// Mantem so o fim do log em memoria (logs de agentes podem ficar enormes).
+// Keep only the tail of the log in memory (agent logs can get huge).
 const MAX_LOG_CHARS = 200_000
 
 const statusVariant = (status: JobStatus): 'default' | 'secondary' | 'destructive' | 'outline' => {
@@ -48,7 +48,7 @@ function JobPage() {
   const navigate = useNavigate()
 
   const job = useQuery(jobQueryOptions(id))
-  // Eventos: busca incremental com `after=<ultimo id>`, acumulando no cache.
+  // Events: incremental fetch with `after=<last id>`, accumulated in the cache.
   const eventsKey = ['job', id, 'events'] as const
   const events = useQuery({
     queryKey: eventsKey,
@@ -64,7 +64,7 @@ function JobPage() {
     },
   })
 
-  // Log ao vivo dos agentes: busca incremental por offset de bytes, acumulando no cache.
+  // Live agent log: incremental fetch by byte offset, accumulated in the cache.
   const terminal = isTerminal(job.data?.status)
   const logKey = ['job', id, 'log'] as const
   const log = useQuery({
@@ -78,7 +78,7 @@ function JobPage() {
     refetchInterval: terminal ? false : 1500,
   })
 
-  // Auto-scroll para o fim, a menos que a pessoa tenha rolado para cima.
+  // Auto-scroll to the bottom unless the user has scrolled up.
   const logRef = useRef<HTMLPreElement>(null)
   const stickToBottom = useRef(true)
   useEffect(() => {
@@ -86,7 +86,7 @@ function JobPage() {
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
   }, [log.data?.text])
 
-  // Job terminou: uma busca final pega eventos e log gravados depois do ultimo poll.
+  // Job finished: one final fetch picks up events and log written after the last poll.
   useEffect(() => {
     if (terminal) {
       void events.refetch()
@@ -95,7 +95,7 @@ function JobPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminal])
 
-  // Acao humana mudou o estado: recarrega este job, o pai (se for item de loop) e a lista.
+  // A human action changed the state: reload this job, the parent (if it is a loop item) and the list.
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['job'] })
     void queryClient.invalidateQueries({ queryKey: jobsQueryOptions.queryKey })
@@ -105,7 +105,7 @@ function JobPage() {
     mutationFn: () => resumeJob(id),
     onSuccess: ({ id: newId }) => {
       refresh()
-      // Loop retoma o mesmo job; job comum cria um novo.
+      // A loop resumes the same job; a regular job creates a new one.
       if (newId !== id) void navigate({ to: '/jobs/$jobId', params: { jobId: String(newId) } })
     },
   })
@@ -119,14 +119,14 @@ function JobPage() {
       <div className="space-y-4">
         <p className="text-sm text-destructive">{job.error.message}</p>
         <Link to="/runs" className="text-sm underline-offset-4 hover:underline">
-          Voltar para jobs
+          Back to jobs
         </Link>
       </div>
     )
   }
 
   if (job.isLoading || !job.data) {
-    return <p className="text-sm text-muted-foreground">Carregando job…</p>
+    return <p className="text-sm text-muted-foreground">Loading job…</p>
   }
 
   const data = job.data
@@ -141,7 +141,7 @@ function JobPage() {
               {data.status}
             </Badge>
           </h1>
-          <p className="text-sm text-muted-foreground">Projeto: {data.project}</p>
+          <p className="text-sm text-muted-foreground">Project: {data.project}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {data.pr_url && (
@@ -157,12 +157,12 @@ function JobPage() {
           {data.actions.create_pr && (
             <Button
               onClick={() => {
-                if (window.confirm(`Empurrar a branch ${data.branch} e abrir PR para ${data.base_branch}?`))
+                if (window.confirm(`Push branch ${data.branch} and open a PR against ${data.base_branch}?`))
                   createPr.mutate()
               }}
               disabled={createPr.isPending}
             >
-              {createPr.isPending ? 'Criando PR…' : 'Create PR'}
+              {createPr.isPending ? 'Creating PR…' : 'Create PR'}
             </Button>
           )}
           {data.actions.approve && (
@@ -170,24 +170,24 @@ function JobPage() {
               onClick={() => {
                 if (
                   window.confirm(
-                    `Aprovar e fazer MERGE do PR #${data.pr_number} em ${data.base_branch}? Isso e uma acao no GitHub.`,
+                    `Approve and MERGE PR #${data.pr_number} into ${data.base_branch}? This is an action on GitHub.`,
                   )
                 )
                   approve.mutate()
               }}
               disabled={approve.isPending}
             >
-              {approve.isPending ? 'Mergeando…' : 'Approve & merge'}
+              {approve.isPending ? 'Merging…' : 'Approve & merge'}
             </Button>
           )}
           {data.actions.cancel && (
             <Button variant="outline" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
-              Cancelar
+              Cancel
             </Button>
           )}
           {(data.actions.resume || (data.kind === 'job' && terminal)) && (
             <Button variant="outline" onClick={() => resume.mutate()} disabled={resume.isPending}>
-              {resume.isPending ? 'Retomando…' : data.kind === 'loop' ? 'Continuar loop' : 'Retomar'}
+              {resume.isPending ? 'Resuming…' : data.kind === 'loop' ? 'Continue loop' : 'Resume'}
             </Button>
           )}
         </div>
@@ -203,7 +203,7 @@ function JobPage() {
               {data.parent_job_id && (
                 <>
                   {' '}
-                  do{' '}
+                  of{' '}
                   <Link
                     to="/jobs/$jobId"
                     params={{ jobId: String(data.parent_job_id) }}
@@ -215,13 +215,13 @@ function JobPage() {
               )}
             </CardDescription>
             <CardTitle className="font-mono text-sm font-normal">
-              {data.branch ?? '(branch ainda nao criada)'} → {data.base_branch ?? '?'}
+              {data.branch ?? '(branch not created yet)'} → {data.base_branch ?? '?'}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <p>
-              Review: <Badge variant="outline">{data.review_verdict ?? 'pendente'}</Badge> Merge:{' '}
-              <Badge variant="outline">{data.merge_state ?? 'pendente'}</Badge>
+              Review: <Badge variant="outline">{data.review_verdict ?? 'pending'}</Badge> Merge:{' '}
+              <Badge variant="outline">{data.merge_state ?? 'pending'}</Badge>
             </p>
             {data.review_message && (
               <pre className="whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
@@ -235,10 +235,10 @@ function JobPage() {
       {data.kind === 'loop' && (
         <section className="space-y-2">
           <h2 className="text-lg font-semibold">
-            Itens de trabalho <span className="text-sm font-normal text-muted-foreground">(estado: {data.state})</span>
+            Work items <span className="text-sm font-normal text-muted-foreground">(state: {data.state})</span>
           </h2>
           {data.children.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum item executado ainda.</p>
+            <p className="text-sm text-muted-foreground">No items run yet.</p>
           ) : (
             <div className="rounded-md border">
               <Table>
@@ -305,7 +305,7 @@ function JobPage() {
       {data.report && (
         <Card>
           <CardHeader>
-            <CardDescription>Relatorio</CardDescription>
+            <CardDescription>Report</CardDescription>
           </CardHeader>
           <CardContent>
             <pre className="whitespace-pre-wrap text-sm">{data.report}</pre>
@@ -314,17 +314,17 @@ function JobPage() {
       )}
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Tarefas</h2>
+        <h2 className="text-lg font-semibold">Tasks</h2>
         {data.tasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhuma tarefa ainda.</p>
+          <p className="text-sm text-muted-foreground">No tasks yet.</p>
         ) : (
           <div className="rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Tarefa</TableHead>
+                  <TableHead>Task</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Tentativas</TableHead>
+                  <TableHead>Attempts</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -344,7 +344,7 @@ function JobPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Log do agente</h2>
+        <h2 className="text-lg font-semibold">Agent log</h2>
         {log.isError && <p className="text-sm text-destructive">{log.error.message}</p>}
         <pre
           ref={logRef}
@@ -354,12 +354,12 @@ function JobPage() {
           }}
           className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 font-mono text-xs"
         >
-          {log.data?.text || (terminal ? 'Sem saida registrada para este job.' : 'Aguardando saida do agente…')}
+          {log.data?.text || (terminal ? 'No output recorded for this job.' : 'Waiting for agent output…')}
         </pre>
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-lg font-semibold">Eventos</h2>
+        <h2 className="text-lg font-semibold">Events</h2>
         {events.isError && <p className="text-sm text-destructive">{events.error.message}</p>}
         <ol className="space-y-1 font-mono text-xs">
           {(events.data ?? []).map((event) => (
@@ -371,7 +371,7 @@ function JobPage() {
             </li>
           ))}
         </ol>
-        {!terminal && <p className="text-xs text-muted-foreground">Acompanhando…</p>}
+        {!terminal && <p className="text-xs text-muted-foreground">Following…</p>}
       </section>
     </div>
   )
