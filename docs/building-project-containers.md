@@ -21,8 +21,16 @@ credentials and local account configuration outside the build context.
 
 Run `make image` in the Amaru Light source checkout to build
 `localhost/mini-amaru:latest`. The current tag uses Fedora Minimal 45 and
-includes the Amaru Light binary, dashboard, Git, and GitHub CLI. The legacy
-image tag, launcher, and runtime username still use `mini-amaru`.
+includes the Amaru Light binary, dashboard, Git, GitHub CLI, and
+[ripwire](https://github.com/redhat-et/ripwire), a code map tool that helps
+agents find relevant code with fewer tokens. The legacy image tag, launcher,
+and runtime username still use `mini-amaru`.
+
+The image entrypoint, `/app/entrypoint`, activates the ripwire skills for
+Claude Code and Codex in the runtime user's home at each start, then runs
+`/app/mini-amaru`. Keep that entrypoint in derived images so the skills
+reach the home volume. If the image sets `CLAUDE_CONFIG_DIR`, the skills go
+to its `skills` directory. Set `AMARU_RIPWIRE_SKILLS=0` to skip this step.
 
 Build one derived image per project. Install the agent CLI and the project's
 build and test tools in the derived image. Keep the inherited entrypoint and
