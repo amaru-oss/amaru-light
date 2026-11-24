@@ -1,3 +1,11 @@
+#![allow(
+    unsafe_code,
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::restriction,
+    reason = "legacy runtime, replaced by the v2 daemon"
+)]
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use mini_amaru::{
