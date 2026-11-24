@@ -1,0 +1,19 @@
+# Machine-wide settings for the v2 daemon.
+# The bot account's token is read by `gh` from the GH_TOKEN environment variable.
+state_dir: ../data
+poll_interval: 60s
+max_parallel: 2          # tickets in progress at once (1 or 2)
+gh: gh
+bot_login: amaru-bot     # optional, used by intake.assignee selectors
+
+agents:
+  claude:
+    driver: claude
+    command: claude
+    model: sonnet
+    # The agent runs unattended in its own worktree; it must be able to run
+    # the project's build and tests without asking.
+    args: [--permission-mode, bypassPermissions]
+
+projects:
+  - project.yaml
