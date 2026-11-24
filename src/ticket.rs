@@ -97,6 +97,9 @@ pub struct Ticket {
     pub repo: String,
     pub number: u64,
     pub title: String,
+    /// The issue body when the ticket was prepared.
+    #[serde(default)]
+    pub body: String,
     pub origin: Origin,
     pub state: State,
     /// Why the ticket is blocked, or what it waits for.
@@ -116,6 +119,17 @@ pub struct Ticket {
     pub handled_feedback: Vec<String>,
     /// When the ticket became blocked, as an RFC 3339 time.
     pub blocked_at: Option<String>,
+    /// The state to return to when a human unblocks the ticket.
+    #[serde(default)]
+    pub blocked_from: Option<State>,
+    /// The agent's latest summary of its work.
+    #[serde(default)]
+    pub summary: Option<String>,
+    /// Whether the agent claims every requirement of the issue is met.
+    #[serde(default)]
+    pub complete: bool,
+    #[serde(default)]
+    pub self_reviewed: bool,
 }
 
 impl Ticket {
@@ -125,6 +139,7 @@ impl Ticket {
             repo,
             number,
             title,
+            body: String::new(),
             origin,
             state: State::Queued,
             reason: None,
@@ -138,7 +153,21 @@ impl Ticket {
             review_rounds: 0,
             handled_feedback: Vec::new(),
             blocked_at: None,
+            blocked_from: None,
+            summary: None,
+            complete: false,
+            self_reviewed: false,
         }
+    }
+
+    /// The git ref the ticket branch starts from and is compared with.
+    pub fn base_ref(&self) -> Option<String> {
+        let base = self.base.as_deref()?;
+        Some(if self.stacked_on.is_some() {
+            base.to_owned()
+        } else {
+            format!("origin/{base}")
+        })
     }
 
     /// `owner/name#42`, for logs and comments.
@@ -147,9 +176,45 @@ impl Ticket {
     }
 }
 
+/// A branch-friendly form of an issue title.
+pub fn slug(title: &str) -> String {
+    let words: Vec<String> = title
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let mut slug = String::new();
+    for word in words {
+        if slug.len() + word.len() > 40 {
+            break;
+        }
+        if !slug.is_empty() {
+            slug.push('-');
+        }
+        slug.push_str(&word);
+    }
+    if slug.is_empty() { "work".into() } else { slug }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slugs_and_base_refs() {
+        assert_eq!(
+            slug("Fix: the *Safari* export button!"),
+            "fix-the-safari-export-button"
+        );
+        assert_eq!(slug("???"), "work");
+        let mut t = Ticket::new(1, "me/a".into(), 1, "t".into(), Origin::Manual);
+        t.base = Some("main".into());
+        assert_eq!(t.base_ref().as_deref(), Some("origin/main"));
+        t.stacked_on = Some(3);
+        t.base = Some("amaru/3-x".into());
+        assert_eq!(t.base_ref().as_deref(), Some("amaru/3-x"));
+    }
 
     #[test]
     fn states_round_trip() {

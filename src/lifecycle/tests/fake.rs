@@ -1,0 +1,261 @@
+//! Test doubles: an in-memory forge and a scripted agent CLI.
+
+use super::super::Services;
+use crate::{
+    db::Store,
+    forge::{Feedback, Forge, Issue, NewPullRequest, PullRequest, Selector, Target, TicketSource},
+    process,
+    prompts::Prompts,
+    settings::Settings,
+    ticket::{Origin, Ticket},
+    worktree::Workspace,
+};
+use anyhow::Result;
+use async_trait::async_trait;
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
+
+/// Answers like Claude Code and acts on the kind of prompt it receives.
+const AGENT: &str = r#"#!/bin/sh
+prompt=$(cat)
+dir=$(dirname "$0")
+n=$(ls "$dir"/prompt-* 2>/dev/null | wc -l)
+printf '%s' "$prompt" > "$dir/prompt-$n"
+echo "$*" > "$dir/args-$n"
+c() { git -c user.name=agent -c user.email=agent@example.com "$@"; }
+mkdir -p .amaru
+case "$prompt" in
+  *"You are working on issue"*) echo done >> feature.txt; c add feature.txt; c commit -qm feature
+    echo '{"status":"done","summary":"Added the feature","complete":true}' > .amaru/result.json ;;
+  *"project check"*) touch fixed.txt; c add fixed.txt; c commit -qm fix
+    echo '{"status":"done","summary":"Fixed"}' > .amaru/result.json ;;
+  *"received this feedback"*) echo renamed > feature.txt; c commit -qam rename
+    echo '{"status":"done","summary":"Renamed","replies":[{"thread_id":"line-7","body":"renamed"}]}' > .amaru/result.json ;;
+esac
+echo '{"type":"system","subtype":"init","session_id":"sess-1"}'
+echo '{"type":"result","is_error":false,"result":"ok","session_id":"sess-1"}'
+"#;
+
+#[derive(Debug, Default)]
+pub struct ForgeState {
+    pub comments: Vec<(u64, String)>,
+    pub labels: Vec<(u64, String)>,
+    pub prs: Vec<NewPullRequest>,
+    pub feedback: Vec<Feedback>,
+    pub replies: Vec<(String, String)>,
+    pub merged: bool,
+    pub blocked_by: Vec<(u64, Vec<u64>)>,
+}
+
+#[derive(Debug, Default)]
+pub struct FakeForge(Mutex<ForgeState>);
+
+impl FakeForge {
+    pub fn state(&self) -> MutexGuard<'_, ForgeState> {
+        self.0.lock().unwrap()
+    }
+    pub fn add_feedback(&self, f: Feedback) {
+        self.state().feedback.push(f);
+    }
+    pub fn merge(&self) {
+        self.state().merged = true;
+    }
+    pub fn set_blocked_by(&self, issue: u64, by: Vec<u64>) {
+        self.state().blocked_by.push((issue, by));
+    }
+    fn pr_for(&self, index: usize) -> PullRequest {
+        let merged = self.state().merged;
+        PullRequest {
+            number: 100 + index as u64,
+            url: format!("https://example.com/pr/{}", 100 + index),
+            open: !merged,
+            merged,
+            head_sha: "abc".into(),
+        }
+    }
+}
+
+#[async_trait]
+impl TicketSource for FakeForge {
+    async fn eligible(&self, _: &str, _: &Selector) -> Result<Vec<Issue>> {
+        Ok(Vec::new())
+    }
+    async fn milestone(&self, _: &str, _: &str) -> Result<Vec<Issue>> {
+        Ok(Vec::new())
+    }
+    async fn issue(&self, _: &str, number: u64) -> Result<Issue> {
+        let blocked_by = self
+            .state()
+            .blocked_by
+            .iter()
+            .find(|(n, _)| *n == number)
+            .map(|(_, b)| b.clone());
+        Ok(Issue {
+            number,
+            title: "Add a feature".into(),
+            body: "Please add it".into(),
+            open: true,
+            blocked_by: blocked_by.unwrap_or_default(),
+            ..Issue::default()
+        })
+    }
+    async fn comment(&self, _: &str, number: u64, body: &str) -> Result<()> {
+        self.state().comments.push((number, body.into()));
+        Ok(())
+    }
+    async fn add_label(&self, _: &str, number: u64, label: &str) -> Result<()> {
+        self.state().labels.push((number, label.into()));
+        Ok(())
+    }
+    async fn remove_label(&self, _: &str, number: u64, label: &str) -> Result<()> {
+        self.state()
+            .labels
+            .retain(|l| *l != (number, label.to_owned()));
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Forge for FakeForge {
+    async fn find_pr(&self, _: &Target, _: &str) -> Result<Option<PullRequest>> {
+        Ok(None)
+    }
+    async fn open_pr(&self, _: &Target, pr: &NewPullRequest) -> Result<PullRequest> {
+        let index = self.state().prs.len();
+        self.state().prs.push(pr.clone());
+        Ok(self.pr_for(index))
+    }
+    async fn pr(&self, _: &str, number: u64) -> Result<PullRequest> {
+        Ok(self.pr_for(usize::try_from(number - 100)?))
+    }
+    async fn feedback(&self, _: &str, _: &PullRequest) -> Result<Vec<Feedback>> {
+        Ok(self.state().feedback.clone())
+    }
+    async fn reply(&self, _: &str, _: u64, to: &Feedback, body: &str) -> Result<()> {
+        self.state().replies.push((to.id.clone(), body.into()));
+        Ok(())
+    }
+}
+
+pub struct Fake {
+    pub dir: tempfile::TempDir,
+    pub forge: Arc<FakeForge>,
+    pub svc: Services,
+}
+
+async fn git(cwd: &Path, args: &[&str]) {
+    process::capture("git", args, cwd, Duration::from_secs(60))
+        .await
+        .unwrap();
+}
+
+async fn upstream(root: &Path) {
+    let seed = seed(root).await;
+    let bare = root.join("remotes/me/app.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let (seed, bare) = (seed.to_string_lossy(), bare.to_string_lossy());
+    git(root, &["clone", "-q", "--bare", &seed, &bare]).await;
+}
+
+async fn seed(root: &Path) -> PathBuf {
+    let seed = root.join("seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git(&seed, &["init", "-q", "-b", "main"]).await;
+    std::fs::write(seed.join("README"), "hi\n").unwrap();
+    git(&seed, &["add", "README"]).await;
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    )
+    .await;
+    seed
+}
+
+fn write_settings(root: &Path, check: &str) -> PathBuf {
+    let agent = root.join("agent/claude");
+    std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
+    std::fs::write(&agent, AGENT).unwrap();
+    std::fs::set_permissions(&agent, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let checks = if check.is_empty() {
+        String::new()
+    } else {
+        format!("checks:\n  - {{name: check, run: \"{check}\"}}\n")
+    };
+    std::fs::write(root.join("project.yaml"), format!(
+        "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}"
+    )).unwrap();
+    let daemon = format!(
+        "state_dir: state\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
+        agent.display()
+    );
+    std::fs::write(root.join("daemon.yaml"), daemon).unwrap();
+    root.join("daemon.yaml")
+}
+
+impl Fake {
+    pub async fn new(check: &str) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        upstream(dir.path()).await;
+        let settings = Settings::load(&write_settings(dir.path(), check)).unwrap();
+        let forge = Arc::new(FakeForge::default());
+        let url_base = format!("file://{}/remotes/", dir.path().display());
+        let svc = Services {
+            store: Arc::new(Store::open(&settings.state_dir().join("amaru.db")).unwrap()),
+            workspace: Workspace::new(&settings.state_dir()).with_url_base(&url_base),
+            settings: Arc::new(settings),
+            source: forge.clone(),
+            forge: forge.clone(),
+            prompts: Prompts::default(),
+        };
+        Self { dir, forge, svc }
+    }
+
+    pub async fn claim(&self, number: u64) -> Ticket {
+        self.svc
+            .store
+            .claim("me/app", number, "Add a feature", Origin::Manual)
+            .unwrap()
+            .unwrap()
+    }
+
+    fn agent_files(&self, prefix: &str) -> Vec<String> {
+        (0..)
+            .map(|n| self.dir.path().join(format!("agent/{prefix}-{n}")))
+            .take_while(|p| p.exists())
+            .map(|p| std::fs::read_to_string(p).unwrap())
+            .collect()
+    }
+
+    pub fn prompts(&self) -> Vec<String> {
+        self.agent_files("prompt")
+    }
+
+    pub fn resumed_every_turn_after_the_first(&self) -> bool {
+        let args = self.agent_files("args");
+        !args[0].contains("--resume") && args[1..].iter().all(|a| a.contains("--resume sess-1"))
+    }
+
+    pub async fn upstream_has(&self, branch: &str) -> bool {
+        let bare = self.dir.path().join("remotes/me/app.git");
+        let out = process::capture(
+            "git",
+            &["branch", "--list", branch],
+            &bare,
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+        out.contains(branch)
+    }
+}

@@ -1,0 +1,128 @@
+//! End-to-end lifecycle tests: a fake forge, a fake agent CLI and real git.
+
+mod fake;
+
+use super::*;
+use crate::{
+    forge::{Feedback, FeedbackKind},
+    ticket::Origin,
+};
+use fake::Fake;
+use std::path::Path;
+
+async fn drive(fake: &Fake, ticket: Ticket) -> Ticket {
+    let mut job = Job::new(&fake.svc, ticket, None).unwrap();
+    job.drive().await.unwrap();
+    job.into_ticket()
+}
+
+fn file(worktree: &Path, name: &str) -> String {
+    std::fs::read_to_string(worktree.join(name)).unwrap_or_default()
+}
+
+#[tokio::test]
+async fn takes_an_issue_to_a_pull_request_in_one_session() {
+    let fake = Fake::new("").await;
+    let ticket = fake.claim(1).await;
+    let ticket = drive(&fake, ticket).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert_eq!(ticket.session_id.as_deref(), Some("sess-1"));
+    assert_eq!(ticket.pr_number, Some(100));
+    let worktree = ticket.worktree.clone().unwrap();
+    assert_eq!(file(&worktree, "feature.txt"), "done\n");
+    assert!(fake.upstream_has("amaru/1-add-a-feature").await);
+    let forge = fake.forge.state();
+    assert_eq!(forge.prs[0].base, "main");
+    assert!(forge.prs[0].body.starts_with("Closes #1"));
+    assert!(forge.labels.contains(&(1, WORKING_LABEL.to_owned())));
+}
+
+#[tokio::test]
+async fn fixes_failing_checks_in_the_same_session() {
+    let fake = Fake::new("test -f fixed.txt").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert_eq!(ticket.fix_rounds, 1);
+    let prompts = fake.prompts();
+    assert!(prompts[1].contains("test -f fixed.txt"));
+    assert!(fake.resumed_every_turn_after_the_first());
+}
+
+#[tokio::test]
+async fn blocks_when_checks_keep_failing() {
+    let fake = Fake::new("false").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::Blocked);
+    assert_eq!(ticket.blocked_from, Some(State::Checking));
+    assert!(
+        ticket
+            .reason
+            .unwrap()
+            .contains("still fails after 3 fix rounds")
+    );
+    let forge = fake.forge.state();
+    assert!(forge.labels.contains(&(1, BLOCKED_LABEL.to_owned())));
+}
+
+#[tokio::test]
+async fn addresses_review_feedback_from_allowed_reviewers_only() {
+    let fake = Fake::new("").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    fake.forge.add_feedback(feedback("line-7", "me"));
+    fake.forge.add_feedback(feedback("line-8", "stranger"));
+    let ticket = poll_review(&fake.svc, ticket).await.unwrap();
+    assert_eq!(ticket.state, State::AddressingReview);
+    let ticket = drive(&fake, ticket).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert_eq!(ticket.handled_feedback, ["line-7"]);
+    let replies = fake.forge.state().replies.clone();
+    assert_eq!(replies, [("line-7".to_owned(), "renamed".to_owned())]);
+    assert!(!fake.prompts().last().unwrap().contains("stranger"));
+    let ticket = poll_review(&fake.svc, ticket).await.unwrap();
+    assert_eq!(ticket.state, State::AwaitingReview);
+}
+
+#[tokio::test]
+async fn finishes_when_the_pull_request_is_merged() {
+    let fake = Fake::new("").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    let worktree = ticket.worktree.clone().unwrap();
+    fake.forge.merge();
+    let ticket = poll_review(&fake.svc, ticket).await.unwrap();
+    assert_eq!(ticket.state, State::Done);
+    assert!(!worktree.exists());
+}
+
+#[tokio::test]
+async fn stacks_on_an_unmerged_dependency() {
+    let fake = Fake::new("").await;
+    let first = drive(&fake, fake.claim(1).await).await;
+    fake.forge.set_blocked_by(2, vec![1]);
+    let second = drive(&fake, fake.claim(2).await).await;
+    assert_eq!(second.stacked_on, Some(1));
+    assert_eq!(second.base, first.branch);
+    let forge = fake.forge.state();
+    assert_eq!(forge.prs[1].base, "amaru/1-add-a-feature");
+}
+
+fn feedback(id: &str, author: &str) -> Feedback {
+    Feedback {
+        id: id.into(),
+        kind: FeedbackKind::LineComment,
+        author: author.into(),
+        body: "please rename".into(),
+        path: Some("feature.txt".into()),
+        line: Some(1),
+    }
+}
+
+#[tokio::test]
+async fn unblock_returns_to_the_blocked_state() {
+    let mut ticket = Ticket::new(1, "me/app".into(), 1, "t".into(), Origin::Manual);
+    ticket.state = State::Blocked;
+    ticket.blocked_from = Some(State::Checking);
+    ticket.fix_rounds = 4;
+    unblock(&mut ticket);
+    assert_eq!(ticket.state, State::Checking);
+    assert_eq!(ticket.fix_rounds, 0);
+}

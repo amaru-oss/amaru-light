@@ -1,0 +1,195 @@
+//! Watching the pull request and acting on the feedback it receives.
+
+use super::{BLOCKED_LABEL, Job, Services, WORKING_LABEL, blocked, turn::Session};
+use crate::{
+    forge::{Feedback, FeedbackKind, PullRequest},
+    settings::ProjectSettings,
+    ticket::{State, Ticket},
+};
+use anyhow::{Context, Result};
+use serde_json::json;
+
+/// Feedback the agent should act on: from an allowed reviewer or a failing
+/// check, and not handled before.
+fn actionable(
+    project: &ProjectSettings,
+    bot: Option<&str>,
+    ticket: &Ticket,
+    all: Vec<Feedback>,
+) -> Vec<Feedback> {
+    let review = &project.review;
+    all.into_iter()
+        .filter(|f| !ticket.handled_feedback.contains(&f.id))
+        .filter(|f| bot.is_none_or(|b| !f.author.eq_ignore_ascii_case(b)))
+        .filter(|f| match f.kind {
+            FeedbackKind::FailedCheck => review.fix_ci,
+            _ => {
+                review.respond
+                    && review
+                        .reviewers
+                        .iter()
+                        .any(|r| r.eq_ignore_ascii_case(&f.author))
+            }
+        })
+        .collect()
+}
+
+fn describe(feedback: &[Feedback]) -> String {
+    feedback
+        .iter()
+        .map(|f| {
+            let place = match (&f.path, f.line) {
+                (Some(path), Some(line)) => format!(" on {path}:{line}"),
+                (Some(path), None) => format!(" on {path}"),
+                _ => String::new(),
+            };
+            format!(
+                "- id `{}` ({:?} by {}{place}):\n  {}",
+                f.id,
+                f.kind,
+                f.author,
+                f.body.replace('\n', "\n  ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+async fn pending(
+    svc: &Services,
+    project: &ProjectSettings,
+    ticket: &Ticket,
+    pr: &PullRequest,
+) -> Result<Vec<Feedback>> {
+    let all = svc.forge.feedback(&ticket.repo, pr).await?;
+    let bot = svc.settings.daemon.bot_login.as_deref();
+    Ok(actionable(project, bot, ticket, all))
+}
+
+async fn finish(svc: &Services, ticket: &mut Ticket) -> Result<()> {
+    ticket.state = State::Done;
+    svc.store.save(ticket)?;
+    svc.store
+        .event(ticket.id, "STATE", &json!({ "to": State::Done }))?;
+    svc.source
+        .remove_label(&ticket.repo, ticket.number, WORKING_LABEL)
+        .await?;
+    if let Some(worktree) = ticket.worktree.take() {
+        // A worktree that is already gone needs no cleanup.
+        let _ = svc.workspace.remove(&ticket.repo, &worktree).await;
+        svc.store.save(ticket)?;
+    }
+    Ok(())
+}
+
+/// Check a ticket waiting for review: merged, closed, or new feedback.
+pub async fn poll_review(svc: &Services, mut ticket: Ticket) -> Result<Ticket> {
+    let project = svc
+        .settings
+        .project(&ticket.repo)
+        .context("unknown project")?;
+    let number = ticket.pr_number.context("ticket has no pull request")?;
+    let pr = svc.forge.pr(&ticket.repo, number).await?;
+    if pr.merged {
+        finish(svc, &mut ticket).await?;
+    } else if !pr.open {
+        ticket.blocked_from = Some(State::AwaitingReview);
+        ticket.reason = Some("the pull request was closed without merging".into());
+        ticket.state = State::Blocked;
+        svc.store.save(&ticket)?;
+        svc.source
+            .add_label(&ticket.repo, ticket.number, BLOCKED_LABEL)
+            .await?;
+    } else if !pending(svc, project, &ticket, &pr).await?.is_empty() {
+        ticket.state = State::AddressingReview;
+        svc.store.save(&ticket)?;
+        svc.store.event(
+            ticket.id,
+            "STATE",
+            &json!({ "to": State::AddressingReview }),
+        )?;
+    }
+    Ok(ticket)
+}
+
+impl Job<'_> {
+    /// Resume the session with the new feedback, verify, push and reply.
+    pub(super) async fn address_review(&mut self) -> Result<State> {
+        let number = self
+            .ticket
+            .pr_number
+            .context("ticket has no pull request")?;
+        let pr = self.svc.forge.pr(&self.ticket.repo, number).await?;
+        let feedback = pending(self.svc, self.project, &self.ticket, &pr).await?;
+        if feedback.is_empty() {
+            return Ok(State::AwaitingReview);
+        }
+        self.next_review_round()?;
+        let prompt = self.svc.prompts.render(
+            "address_review",
+            &[("pr_url", &pr.url), ("feedback", &describe(&feedback))],
+        );
+        let report = self
+            .turn(&self.project.agent.clone(), &prompt, Session::Ticket)
+            .await?;
+        let (replies, summary) = (report.replies.clone(), report.summary.clone());
+        self.accept(report, State::AwaitingReview).await?;
+        self.ticket.fix_rounds = 0;
+        while self.check_until_green().await? {}
+        self.commit_and_push().await?;
+        self.reply(number, &feedback, &replies, &summary).await?;
+        self.ticket
+            .handled_feedback
+            .extend(feedback.into_iter().map(|f| f.id));
+        Ok(State::AwaitingReview)
+    }
+
+    fn next_review_round(&mut self) -> Result<()> {
+        self.ticket.review_rounds += 1;
+        let max = self.project.review.max_rounds;
+        if self.ticket.review_rounds > max {
+            return Err(blocked(format!(
+                "review feedback is still open after {max} rounds"
+            )));
+        }
+        Ok(())
+    }
+
+    /// One check-and-fix round; true while another round is needed.
+    async fn check_until_green(&mut self) -> Result<bool> {
+        match self.check().await? {
+            State::Checking => Ok(true),
+            _ => Ok(false),
+        }
+    }
+
+    async fn commit_and_push(&self) -> Result<()> {
+        let worktree = self.worktree()?;
+        self.svc
+            .workspace
+            .commit_leftovers(&worktree, "Address review feedback")
+            .await?;
+        let branch = self.ticket.branch.clone().context("ticket has no branch")?;
+        self.svc
+            .workspace
+            .push(&worktree, &self.target(), &branch)
+            .await
+    }
+
+    async fn reply(
+        &self,
+        pr: u64,
+        feedback: &[Feedback],
+        replies: &[crate::contract::Reply],
+        summary: &str,
+    ) -> Result<()> {
+        let repo = &self.ticket.repo;
+        for item in feedback {
+            if let Some(reply) = replies.iter().find(|r| r.thread_id == item.id) {
+                self.svc.forge.reply(repo, pr, item, &reply.body).await?;
+            }
+        }
+        let note = format!("Amaru addressed the latest feedback:\n\n{summary}");
+        self.svc.source.comment(repo, pr, &note).await
+    }
+}
