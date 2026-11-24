@@ -5,6 +5,7 @@ FROM docker.io/library/rust:1.98-bookworm AS backend
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
+COPY prompts/ prompts/
 RUN cargo build --release --locked
 
 FROM docker.io/library/node:22-trixie-slim AS frontend
