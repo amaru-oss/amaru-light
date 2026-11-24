@@ -113,4 +113,10 @@ async fn stacks_reuses_and_removes_worktrees() {
     );
     ws.remove("me/app", &wt).await.unwrap();
     assert!(!wt.exists());
+    // Recreating the worktree keeps the branch's commits.
+    let again = ws
+        .create(&target, "amaru/1-fix", "origin/main")
+        .await
+        .unwrap();
+    assert_eq!(ws.ahead(&again, "origin/main").await.unwrap(), 1);
 }

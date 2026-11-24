@@ -90,12 +90,7 @@ impl Workspace {
         let mirror = self.mirror(&target.upstream);
         let path = self.worktree_path(&target.upstream, branch);
         if !path.join(".git").exists() {
-            let dest = path.to_string_lossy().into_owned();
-            git(
-                &mirror,
-                &["worktree", "add", "--quiet", "-B", branch, &dest, base_ref],
-            )
-            .await?;
+            add_worktree(&mirror, &path, branch, base_ref).await?;
         }
         exclude_amaru(&mirror).await?;
         Ok(path)
@@ -149,6 +144,28 @@ impl Workspace {
         .await?;
         Ok(())
     }
+}
+
+/// Check out `branch` at `path`, creating the branch from `base_ref` if it
+/// does not exist. An existing branch keeps its commits, for example after
+/// the worktree of a blocked ticket was cleaned up.
+async fn add_worktree(mirror: &Path, path: &Path, branch: &str, base_ref: &str) -> Result<()> {
+    let dest = path.to_string_lossy().into_owned();
+    let local = format!("refs/heads/{branch}");
+    git(mirror, &["worktree", "prune"]).await?;
+    if git(mirror, &["rev-parse", "--verify", "--quiet", &local])
+        .await
+        .is_ok()
+    {
+        git(mirror, &["worktree", "add", "--quiet", &dest, branch]).await?;
+    } else {
+        git(
+            mirror,
+            &["worktree", "add", "--quiet", "-b", branch, &dest, base_ref],
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Give commits an author when the machine has no git identity configured.

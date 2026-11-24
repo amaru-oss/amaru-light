@@ -130,6 +130,7 @@ pub mod storage;
 pub mod workspace;
 
 pub mod agent;
+pub mod app;
 pub mod checks;
 pub mod contract;
 pub mod db;
@@ -137,6 +138,9 @@ pub mod forge;
 pub mod lifecycle;
 pub mod process;
 pub mod prompts;
+pub mod scheduler;
 pub mod settings;
+#[cfg(test)]
+mod testing;
 pub mod ticket;
 pub mod worktree;
