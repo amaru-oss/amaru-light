@@ -46,10 +46,7 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/daemon.yaml");
         let dir = tempfile::tempdir().unwrap();
         let copy = dir.path().join("daemon.yaml");
-        let text = std::fs::read_to_string(&path)
-            .unwrap()
-            .replace("../data", "data");
-        std::fs::write(&copy, text).unwrap();
+        std::fs::copy(&path, &copy).unwrap();
         std::fs::copy(
             path.with_file_name("project.yaml"),
             dir.path().join("project.yaml"),

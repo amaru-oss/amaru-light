@@ -5,14 +5,8 @@ FROM docker.io/library/rust:1.98-bookworm AS backend
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
-RUN cargo build --release --locked
-
-FROM docker.io/library/node:22-trixie-slim AS frontend
-WORKDIR /build
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
-COPY web/ ./
-RUN VITE_API_URL='' npm run build
+COPY prompts/ prompts/
+RUN cargo build --release --locked --bin amaru
 
 # ripwire (https://github.com/redhat-et/ripwire), a code map tool that lets
 # agents find the code for a task in few tokens. It is built on the same
@@ -42,19 +36,17 @@ COPY --from=ripwire /out/bin/ripwire /usr/local/bin/ripwire
 COPY --from=ripwire /out/share/ripwire/ /usr/local/share/ripwire/
 
 WORKDIR /app
-COPY --from=backend /build/target/release/mini-amaru bin/mini-amaru
-COPY --from=frontend /build/dist/ web/
-COPY config/runtime.yaml config/providers.yaml config/models.yaml config/routing.yaml config/
-COPY skills/ skills/
-COPY packaging/example.yaml projects/example.yaml
-COPY packaging/launch.sh mini-amaru
+COPY --from=backend /build/target/release/amaru bin/amaru
+COPY examples/ examples/
 COPY packaging/container-entrypoint.sh entrypoint
-RUN chmod +x mini-amaru entrypoint \
-    && mkdir -p data repos \
-    && chown mini-amaru:mini-amaru data repos
+# Mount the settings at /config and keep the state (database, mirrors,
+# worktrees) on a volume at /data: set `state_dir: /data` in amaru.yaml.
+RUN chmod +x entrypoint \
+    && mkdir -p /config /data \
+    && chown mini-amaru:mini-amaru /config /data
 
 ENV HOME=/home/mini-amaru
 USER mini-amaru
-EXPOSE 8765
+VOLUME ["/data"]
 ENTRYPOINT ["/app/entrypoint"]
-CMD ["serve", "--host", "0.0.0.0", "--cors-origin", "http://127.0.0.1:8765", "--cors-origin", "http://localhost:8765"]
+CMD ["--config", "/config/amaru.yaml", "serve"]

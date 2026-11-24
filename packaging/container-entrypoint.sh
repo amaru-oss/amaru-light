@@ -1,6 +1,6 @@
 #!/bin/sh
 # Container entrypoint: activate the ripwire agent skills for Claude Code and
-# Codex in the runtime user's home, then start Amaru Light.
+# Codex in the runtime user's home, then start amaru.
 #
 # The home directory is usually a volume, so the skills are activated at each
 # start rather than at build time. The installer is idempotent: it links the
@@ -14,4 +14,4 @@ if [ "${AMARU_RIPWIRE_SKILLS:-1}" != 0 ] && [ -x "$skills" ]; then
             || echo "entrypoint: ripwire skills installer $client failed; continuing" >&2
     done
 fi
-exec /app/mini-amaru "$@"
+exec /app/bin/amaru "$@"
