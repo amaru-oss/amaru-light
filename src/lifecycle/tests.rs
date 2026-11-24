@@ -1,13 +1,11 @@
 //! End-to-end lifecycle tests: a fake forge, a fake agent CLI and real git.
 
-mod fake;
-
 use super::*;
+use crate::testing::Fake;
 use crate::{
     forge::{Feedback, FeedbackKind},
     ticket::Origin,
 };
-use fake::Fake;
 use std::path::Path;
 
 async fn drive(fake: &Fake, ticket: Ticket) -> Ticket {

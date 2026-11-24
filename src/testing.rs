@@ -1,9 +1,10 @@
-//! Test doubles: an in-memory forge and a scripted agent CLI.
+//! Test doubles shared by the lifecycle and scheduler tests: an in-memory
+//! forge, a scripted agent CLI and local git remotes.
 
-use super::super::Services;
 use crate::{
     db::Store,
     forge::{Feedback, Forge, Issue, NewPullRequest, PullRequest, Selector, Target, TicketSource},
+    lifecycle::Services,
     process,
     prompts::Prompts,
     settings::Settings,
@@ -47,7 +48,8 @@ pub struct ForgeState {
     pub feedback: Vec<Feedback>,
     pub replies: Vec<(String, String)>,
     pub merged: bool,
-    pub blocked_by: Vec<(u64, Vec<u64>)>,
+    /// Issues the forge knows; unknown numbers are open, plain issues.
+    pub issues: Vec<Issue>,
 }
 
 #[derive(Debug, Default)]
@@ -63,8 +65,30 @@ impl FakeForge {
     pub fn merge(&self) {
         self.state().merged = true;
     }
-    pub fn set_blocked_by(&self, issue: u64, by: Vec<u64>) {
-        self.state().blocked_by.push((issue, by));
+    pub fn set_blocked_by(&self, number: u64, by: Vec<u64>) {
+        self.update_issue(number, |i| i.blocked_by = by);
+    }
+    pub fn update_issue(&self, number: u64, change: impl FnOnce(&mut Issue)) {
+        let mut issue = self.lookup(number);
+        change(&mut issue);
+        let mut state = self.state();
+        state.issues.retain(|i| i.number != number);
+        state.issues.push(issue);
+    }
+    fn lookup(&self, number: u64) -> Issue {
+        let known = self
+            .state()
+            .issues
+            .iter()
+            .find(|i| i.number == number)
+            .cloned();
+        known.unwrap_or_else(|| Issue {
+            number,
+            title: "Add a feature".into(),
+            body: "Please add it".into(),
+            open: true,
+            ..Issue::default()
+        })
     }
     fn pr_for(&self, index: usize) -> PullRequest {
         let merged = self.state().merged;
@@ -81,26 +105,31 @@ impl FakeForge {
 #[async_trait]
 impl TicketSource for FakeForge {
     async fn eligible(&self, _: &str, _: &Selector) -> Result<Vec<Issue>> {
-        Ok(Vec::new())
+        Ok(self
+            .state()
+            .issues
+            .iter()
+            .filter(|i| i.open)
+            .cloned()
+            .collect())
     }
-    async fn milestone(&self, _: &str, _: &str) -> Result<Vec<Issue>> {
-        Ok(Vec::new())
+    async fn milestone(&self, _: &str, milestone: &str) -> Result<Vec<Issue>> {
+        let issues = self.state().issues.clone();
+        Ok(issues
+            .into_iter()
+            .filter(|i| i.open && i.milestone.as_deref() == Some(milestone))
+            .collect())
     }
     async fn issue(&self, _: &str, number: u64) -> Result<Issue> {
-        let blocked_by = self
-            .state()
-            .blocked_by
-            .iter()
-            .find(|(n, _)| *n == number)
-            .map(|(_, b)| b.clone());
-        Ok(Issue {
-            number,
-            title: "Add a feature".into(),
-            body: "Please add it".into(),
-            open: true,
-            blocked_by: blocked_by.unwrap_or_default(),
-            ..Issue::default()
-        })
+        let mut issue = self.lookup(number);
+        let labels = self.state().labels.clone();
+        issue.labels.extend(
+            labels
+                .into_iter()
+                .filter(|(n, _)| *n == number)
+                .map(|(_, l)| l),
+        );
+        Ok(issue)
     }
     async fn comment(&self, _: &str, number: u64, body: &str) -> Result<()> {
         self.state().comments.push((number, body.into()));
@@ -143,7 +172,7 @@ impl Forge for FakeForge {
 pub struct Fake {
     pub dir: tempfile::TempDir,
     pub forge: Arc<FakeForge>,
-    pub svc: Services,
+    pub svc: Arc<Services>,
 }
 
 async fn git(cwd: &Path, args: &[&str]) {
@@ -196,7 +225,7 @@ fn write_settings(root: &Path, check: &str) -> PathBuf {
         "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}"
     )).unwrap();
     let daemon = format!(
-        "state_dir: state\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
+        "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
         agent.display()
     );
     std::fs::write(root.join("daemon.yaml"), daemon).unwrap();
@@ -210,14 +239,14 @@ impl Fake {
         let settings = Settings::load(&write_settings(dir.path(), check)).unwrap();
         let forge = Arc::new(FakeForge::default());
         let url_base = format!("file://{}/remotes/", dir.path().display());
-        let svc = Services {
+        let svc = Arc::new(Services {
             store: Arc::new(Store::open(&settings.state_dir().join("amaru.db")).unwrap()),
             workspace: Workspace::new(&settings.state_dir()).with_url_base(&url_base),
             settings: Arc::new(settings),
             source: forge.clone(),
             forge: forge.clone(),
             prompts: Prompts::default(),
-        };
+        });
         Self { dir, forge, svc }
     }
 

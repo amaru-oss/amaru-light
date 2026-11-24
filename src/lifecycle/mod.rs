@@ -139,10 +139,24 @@ impl<'a> Job<'a> {
             if self.is_cancelled() {
                 return self.transition(State::Cancelled);
             }
+            if let Err(e) = self.ensure_worktree().await {
+                return self.stop(e).await;
+            }
             match self.step().await {
                 Ok(next) => self.transition(next)?,
                 Err(e) => self.stop(e).await?,
             }
+        }
+        Ok(())
+    }
+
+    /// Recreate a missing worktree (after cleanup or on a new machine).
+    async fn ensure_worktree(&mut self) -> Result<()> {
+        let needs = !matches!(self.ticket.state, State::Queued | State::Preparing);
+        let present = self.ticket.worktree.as_ref().is_some_and(|p| p.exists());
+        if needs && !present {
+            self.create_worktree().await?;
+            self.save()?;
         }
         Ok(())
     }
@@ -169,6 +183,11 @@ impl<'a> Job<'a> {
             Ok(Blocked(reason)) => self.block(&reason).await,
             Err(other) => Err(other),
         }
+    }
+
+    /// Block the ticket because of an error the daemon could not recover from.
+    pub async fn fail(&mut self, error: &anyhow::Error) -> Result<()> {
+        self.block(&format!("{error:#}")).await
     }
 
     async fn block(&mut self, reason: &str) -> Result<()> {
