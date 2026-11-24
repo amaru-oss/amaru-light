@@ -129,6 +129,9 @@ pub mod storage;
 )]
 pub mod workspace;
 
+pub mod agent;
+pub mod contract;
 pub mod db;
+pub mod process;
 pub mod settings;
 pub mod ticket;
