@@ -81,6 +81,7 @@ impl Workspace {
             }
         }
         git(&mirror, &["fetch", "--quiet", "--prune", "origin"]).await?;
+        ensure_identity(&mirror).await?;
         Ok(mirror)
     }
 
@@ -148,6 +149,16 @@ impl Workspace {
         .await?;
         Ok(())
     }
+}
+
+/// Give commits an author when the machine has no git identity configured.
+async fn ensure_identity(mirror: &Path) -> Result<()> {
+    if git(mirror, &["config", "user.email"]).await.is_err() {
+        git(mirror, &["config", "user.name", "Amaru Light"]).await?;
+        let email = "amaru-light@users.noreply.github.com";
+        git(mirror, &["config", "user.email", email]).await?;
+    }
+    Ok(())
 }
 
 /// Keep the agent's result file out of commits in every worktree.
