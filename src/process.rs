@@ -175,6 +175,37 @@ pub async fn shell(
     Ok((output.exit, tail(&text, STDERR_TAIL)))
 }
 
+/// Run a program to completion and return its stdout; fail on a non-zero exit.
+pub async fn capture(
+    program: &str,
+    args: &[&str],
+    cwd: &std::path::Path,
+    timeout: Duration,
+) -> Result<String> {
+    let spec = Spec {
+        program: program.into(),
+        args: args.iter().map(|a| (*a).to_owned()).collect(),
+        cwd: cwd.to_path_buf(),
+        timeout,
+        ..Spec::default()
+    };
+    let mut text = String::new();
+    let output = run(&spec, None, &mut |line| {
+        text.push_str(line);
+        text.push('\n');
+    })
+    .await?;
+    if !output.success() {
+        anyhow::bail!(
+            "{program} {} failed ({:?}): {}",
+            args.join(" "),
+            output.exit,
+            output.stderr.trim()
+        );
+    }
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
