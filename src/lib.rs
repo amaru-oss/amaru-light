@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 //! Legacy job and delivery-loop runtime. The modules below predate the
 //! project lint configuration and are exempt until the v2 daemon replaces them.
 
@@ -127,3 +128,5 @@ pub mod storage;
     reason = "legacy runtime, replaced by the v2 daemon"
 )]
 pub mod workspace;
+
+pub mod settings;

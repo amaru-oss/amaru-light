@@ -141,3 +141,12 @@ push and a reply per addressed thread. The daemon never resolves threads.
 - No merges. Pushes only to branches the daemon created.
 - The worktree of a BLOCKED ticket is kept for `workspace.keep_blocked`
   (for example `7d`, `0`, `forever`).
+
+## Implementation notes
+
+- The crate follows the Wanaku lint configuration (`clippy.toml`,
+  `[lints]` in `Cargo.toml`): no `unwrap`, `expect`, `panic` or `unsafe` in
+  production code, short functions, and no `std::thread::spawn` or
+  `std::thread::sleep`. The daemon is therefore built on tokio.
+- Configuration lives in `src/settings.rs`; `examples/` holds a daemon file and
+  a project file that the tests load.
