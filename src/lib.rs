@@ -130,8 +130,11 @@ pub mod storage;
 pub mod workspace;
 
 pub mod agent;
+pub mod checks;
 pub mod contract;
 pub mod db;
+pub mod forge;
 pub mod process;
 pub mod settings;
 pub mod ticket;
+pub mod worktree;
