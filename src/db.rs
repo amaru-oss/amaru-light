@@ -1,0 +1,278 @@
+//! SQLite persistence for tickets and their event log.
+//!
+//! Every state change is saved before the side effect that follows it, so a
+//! restarted daemon resumes each ticket from its last saved state.
+
+use crate::ticket::{Origin, State, Ticket};
+use anyhow::{Context, Result, anyhow};
+use rusqlite::{Connection, OptionalExtension, params};
+use serde::Serialize;
+use serde_json::Value;
+use std::{path::Path, sync::Mutex, time::Duration};
+
+const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS tickets_issue ON tickets (repo, number);
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL REFERENCES tickets (id),
+    at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS events_ticket ON events (ticket_id, id);
+";
+
+/// One entry of a ticket's event log.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Event {
+    pub id: i64,
+    pub at: String,
+    pub kind: String,
+    pub payload: Value,
+}
+
+pub fn now() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+/// Thread-safe handle to the daemon database.
+#[derive(Debug)]
+pub struct Store {
+    conn: Mutex<Connection>,
+}
+
+fn terminal_states() -> String {
+    State::ALL
+        .into_iter()
+        .filter(|s| s.is_terminal())
+        .map(|s| format!("'{s}'"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn decode(data: &str) -> Result<Ticket> {
+    serde_json::from_str(data).context("corrupt ticket row")
+}
+
+impl Store {
+    pub fn open(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let conn = Connection::open(path)?;
+        conn.busy_timeout(Duration::from_secs(10))?;
+        conn.execute_batch("PRAGMA journal_mode = WAL;")?;
+        conn.execute_batch(SCHEMA)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
+    fn with<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| anyhow!("database lock poisoned"))?;
+        f(&conn)
+    }
+
+    /// Queue an issue unless an unfinished ticket for it already exists.
+    pub fn claim(
+        &self,
+        repo: &str,
+        number: u64,
+        title: &str,
+        origin: Origin,
+    ) -> Result<Option<Ticket>> {
+        if self.open_ticket(repo, number)?.is_some() {
+            return Ok(None);
+        }
+        let id = self.with(|c| {
+            let at = now();
+            c.execute(
+                "INSERT INTO tickets (repo, number, state, data, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, '{}', ?4, ?4)",
+                params![repo, number, State::Queued.as_str(), at],
+            )?;
+            Ok(c.last_insert_rowid())
+        })?;
+        let ticket = Ticket::new(id, repo.into(), number, title.into(), origin);
+        self.save(&ticket)?;
+        self.event(id, "CLAIMED", &serde_json::json!({ "origin": origin }))?;
+        Ok(Some(ticket))
+    }
+
+    pub fn save(&self, ticket: &Ticket) -> Result<()> {
+        let data = serde_json::to_string(ticket)?;
+        self.with(|c| {
+            c.execute(
+                "UPDATE tickets SET state = ?1, data = ?2, updated_at = ?3 WHERE id = ?4",
+                params![ticket.state.as_str(), data, now(), ticket.id],
+            )?;
+            Ok(())
+        })
+    }
+
+    pub fn get(&self, id: i64) -> Result<Option<Ticket>> {
+        let data: Option<String> = self.with(|c| {
+            Ok(
+                c.query_row("SELECT data FROM tickets WHERE id = ?1", [id], |r| r.get(0))
+                    .optional()?,
+            )
+        })?;
+        data.as_deref().map(decode).transpose()
+    }
+
+    /// The unfinished ticket for an issue, if there is one.
+    pub fn open_ticket(&self, repo: &str, number: u64) -> Result<Option<Ticket>> {
+        let sql = format!(
+            "SELECT data FROM tickets WHERE repo = ?1 COLLATE NOCASE AND number = ?2
+             AND state NOT IN ({}) ORDER BY id DESC LIMIT 1",
+            terminal_states()
+        );
+        let data: Option<String> = self.with(|c| {
+            Ok(c.query_row(&sql, params![repo, number], |r| r.get(0))
+                .optional()?)
+        })?;
+        data.as_deref().map(decode).transpose()
+    }
+
+    fn query(&self, sql: &str, limit: i64) -> Result<Vec<Ticket>> {
+        let rows: Vec<String> = self.with(|c| {
+            let mut stmt = c.prepare(sql)?;
+            let rows = stmt.query_map([limit], |r| r.get(0))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })?;
+        rows.iter().map(|d| decode(d)).collect()
+    }
+
+    /// Every ticket that is not finished, oldest first.
+    pub fn unfinished(&self) -> Result<Vec<Ticket>> {
+        let sql = format!(
+            "SELECT data FROM tickets WHERE state NOT IN ({}) ORDER BY id LIMIT ?1",
+            terminal_states()
+        );
+        self.query(&sql, i64::MAX)
+    }
+
+    /// The most recent tickets, newest first.
+    pub fn recent(&self, limit: i64) -> Result<Vec<Ticket>> {
+        self.query("SELECT data FROM tickets ORDER BY id DESC LIMIT ?1", limit)
+    }
+
+    pub fn event(&self, ticket: i64, kind: &str, payload: &Value) -> Result<()> {
+        let payload = serde_json::to_string(payload)?;
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO events (ticket_id, at, kind, payload) VALUES (?1, ?2, ?3, ?4)",
+                params![ticket, now(), kind, payload],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Events of a ticket with an id greater than `after`, oldest first.
+    pub fn events(&self, ticket: i64, after: i64) -> Result<Vec<Event>> {
+        let rows: Vec<(i64, String, String, String)> = self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, at, kind, payload FROM events
+                 WHERE ticket_id = ?1 AND id > ?2 ORDER BY id",
+            )?;
+            let rows = stmt.query_map(params![ticket, after], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })?;
+        rows.into_iter()
+            .map(|(id, at, kind, payload)| {
+                let payload = serde_json::from_str(&payload)?;
+                Ok(Event {
+                    id,
+                    at,
+                    kind,
+                    payload,
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("state/amaru.db")).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn claims_an_issue_once_while_unfinished() {
+        let (_dir, store) = store();
+        let ticket = store
+            .claim("me/demo", 7, "Fix it", Origin::Manual)
+            .unwrap()
+            .unwrap();
+        assert_eq!(ticket.state, State::Queued);
+        assert!(
+            store
+                .claim("ME/demo", 7, "Fix it", Origin::Autonomous)
+                .unwrap()
+                .is_none()
+        );
+        let mut done = ticket;
+        done.state = State::Done;
+        store.save(&done).unwrap();
+        assert!(
+            store
+                .claim("me/demo", 7, "Again", Origin::Manual)
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn saves_and_reloads_every_field() {
+        let (_dir, store) = store();
+        let mut ticket = store
+            .claim("me/demo", 1, "T", Origin::Milestone)
+            .unwrap()
+            .unwrap();
+        ticket.state = State::AwaitingReview;
+        ticket.session_id = Some("abc".into());
+        ticket.pr_number = Some(12);
+        ticket.handled_feedback.push("review-1".into());
+        store.save(&ticket).unwrap();
+        assert_eq!(store.get(ticket.id).unwrap(), Some(ticket.clone()));
+        assert_eq!(store.unfinished().unwrap(), vec![ticket.clone()]);
+        assert_eq!(store.recent(5).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn records_events_in_order() {
+        let (_dir, store) = store();
+        let ticket = store
+            .claim("me/demo", 1, "T", Origin::Manual)
+            .unwrap()
+            .unwrap();
+        store
+            .event(ticket.id, "STATE", &json!({"to": "PREPARING"}))
+            .unwrap();
+        let events = store.events(ticket.id, 0).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, "CLAIMED");
+        assert_eq!(events[1].payload["to"], "PREPARING");
+        assert_eq!(store.events(ticket.id, events[0].id).unwrap().len(), 1);
+    }
+}
