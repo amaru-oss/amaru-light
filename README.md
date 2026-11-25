@@ -13,6 +13,7 @@ team. The design and the reasons behind it are in [docs/design.md](docs/design.m
 | [Configuration reference](docs/configuration.md) | Every key of the daemon and project files, with defaults. |
 | [GitHub access](docs/github-access.md) | The bot account, its token, fork or direct pushes, and what works without write access. |
 | [Build a project container](docs/building-project-containers.md) | A derived image with your agent CLI and toolchain. |
+| [A prompt to set up a coding bot](docs/coding-bot-prompt.md) | Paste it into a coding agent in your project to get its image, settings and docs. |
 | [Troubleshooting](docs/troubleshooting.md) | Following a ticket, and the errors you are likely to meet first. |
 | [Migrating from v1](docs/migrating-from-v1.md) | Converting v1 settings, commands and containers. |
 

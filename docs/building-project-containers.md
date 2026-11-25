@@ -4,6 +4,10 @@ This guide is for coding agents preparing a project image for Amaru Light.
 Produce a derived `Containerfile`, the daemon and project settings it needs,
 and commands to build and verify it with Podman.
 
+To hand this work to an agent, paste the
+[coding bot prompt](coding-bot-prompt.md) into it from the project's
+repository.
+
 ## Inspect the project first
 
 Read the target repository's `AGENTS.md`, `CLAUDE.md`, build manifests, lockfiles,
