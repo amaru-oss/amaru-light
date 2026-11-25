@@ -28,6 +28,20 @@ fn event_payload(event: &AgentEvent) -> Option<(&'static str, serde_json::Value)
     }
 }
 
+/// The first line of `text`, cut to about `limit` bytes, for the log.
+fn one_line(text: &str, limit: usize) -> String {
+    let line = text.lines().next().unwrap_or_default();
+    let end = (0..=limit.min(line.len()))
+        .rev()
+        .find(|i| line.is_char_boundary(*i))
+        .unwrap_or(0);
+    if end < text.len() {
+        format!("{}…", &line[..end])
+    } else {
+        line.to_owned()
+    }
+}
+
 impl Job<'_> {
     async fn run_agent(
         &self,
@@ -49,7 +63,7 @@ impl Job<'_> {
         let result = agent
             .run(&Turn { prompt, session }, place, &mut |event| {
                 if let AgentEvent::Tool(tool) = event {
-                    self.log(&format!("{agent_name} uses {tool}"));
+                    self.log(&format!("{agent_name} runs {}", one_line(tool, 120)));
                 }
                 if let Some((kind, payload)) = event_payload(event) {
                     // The event log is best effort; the turn result is what counts.
@@ -188,4 +202,20 @@ impl Job<'_> {
 /// Borrow owned placeholder pairs for `Prompts`.
 pub(super) fn as_refs(vars: &[(String, String)]) -> Vec<(&str, &str)> {
     vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::one_line;
+
+    #[test]
+    fn log_lines_keep_the_first_line_only() {
+        assert_eq!(one_line("cargo test", 120), "cargo test");
+        assert_eq!(
+            one_line("apply_patch <<EOF\n*** Begin", 120),
+            "apply_patch <<EOF…"
+        );
+        assert_eq!(one_line("abcdef", 3), "abc…");
+        assert_eq!(one_line("é", 1), "…");
+    }
 }
