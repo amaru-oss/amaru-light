@@ -4,11 +4,11 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use mini_amaru::{
-    app::{parse_issue, services},
-    lifecycle::{BLOCKED_LABEL, Services, unblock},
+    actions::{self, Claimed},
+    app::services,
+    lifecycle::Services,
     process,
     scheduler::{Intake, Scheduler},
-    ticket::{Origin, State},
 };
 use std::{path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
 use tokio::sync::watch;
@@ -29,9 +29,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Run the daemon: claim matching issues and keep every ticket moving.
+    /// Run the daemon and its web page: claim matching issues and keep every
+    /// ticket moving.
     Serve,
-    /// Queue one issue, `owner/name#42`; with --now, work on it right away.
+    /// Queue one issue, `owner/name#42` or its URL; with --now, work on it
+    /// right away.
     Claim {
         issue: String,
         #[arg(long)]
@@ -77,7 +79,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
         Command::Serve => run(svc, Intake::Autonomous, true).await,
         Command::Claim { issue, now } => claim(svc, &issue, now).await,
         Command::Drain { repo, milestone } => {
-            run(svc, Intake::Milestone { repo, milestone }, true).await
+            run(svc, Intake::Milestone { repo, milestone }, false).await
         }
         Command::Status { ticket } => status(&svc, ticket),
         Command::Unblock { ticket } => resume(&svc, ticket).await,
@@ -86,35 +88,43 @@ async fn dispatch(cli: Cli) -> Result<()> {
     }
 }
 
-/// Run the scheduler until it is done or Ctrl-C is pressed.
-async fn run(svc: Arc<Services>, intake: Intake, until_ctrl_c: bool) -> Result<()> {
+/// Run the scheduler, and with `web` the web page, until the scheduler is
+/// done or Ctrl-C is pressed.
+async fn run(svc: Arc<Services>, intake: Intake, web: bool) -> Result<()> {
     let (stop, stop_rx) = watch::channel(false);
-    if until_ctrl_c {
-        tokio::spawn(async move {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                eprintln!("stopping; unfinished tickets resume on the next start");
-                let _ = stop.send(true);
-            }
-        });
+    let server = if web && svc.settings.daemon.web.enabled {
+        Some(mini_amaru::web::start(Arc::clone(&svc), stop_rx.clone()).await?)
+    } else {
+        None
+    };
+    let ctrl_c = stop.clone();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("stopping; unfinished tickets resume on the next start");
+            let _ = ctrl_c.send(true);
+        }
+    });
+    let result = Arc::new(Scheduler::new(svc, intake)).run(stop_rx).await;
+    let _ = stop.send(true);
+    if let Some(server) = server {
+        // The server ends with the stop signal; a panic in it is not ours.
+        let _ = server.await;
     }
-    Arc::new(Scheduler::new(svc, intake)).run(stop_rx).await
+    result
 }
 
 async fn claim(svc: Arc<Services>, reference: &str, now: bool) -> Result<()> {
-    let (repo, number) = parse_issue(reference).context("expected owner/name#number")?;
-    if svc.settings.project(&repo).is_none() {
-        bail!("{repo} is not a configured project");
-    }
-    let issue = svc.source.issue(&repo, number).await?;
-    match svc
-        .store
-        .claim(&repo, number, &issue.title, Origin::Manual)?
-    {
-        Some(ticket) => println!("queued {} as ticket {}", ticket.reference(), ticket.id),
-        None => println!("{reference} already has an unfinished ticket"),
+    match actions::claim(&svc, reference).await? {
+        Claimed::Queued(t) => println!("queued {} as ticket {}", t.reference(), t.id),
+        Claimed::Exists(t) => println!(
+            "{} already has an unfinished ticket: {} ({})",
+            t.reference(),
+            t.id,
+            t.state
+        ),
     }
     if now {
-        return run(svc, Intake::Manual, true).await;
+        return run(svc, Intake::Manual, false).await;
     }
     Ok(())
 }
@@ -141,23 +151,13 @@ fn status(svc: &Services, ticket: Option<i64>) -> Result<()> {
 }
 
 async fn resume(svc: &Services, id: i64) -> Result<()> {
-    let mut ticket = svc.store.get(id)?.context("no such ticket")?;
-    if ticket.state != State::Blocked {
-        bail!("ticket {id} is {}, not blocked", ticket.state);
-    }
-    svc.source
-        .remove_label(&ticket.repo, ticket.number, BLOCKED_LABEL)
-        .await?;
-    unblock(&mut ticket);
-    svc.store.save(&ticket)?;
+    let ticket = actions::resume(svc, id).await?;
     println!("ticket {id} continues from {}", ticket.state);
     Ok(())
 }
 
 fn cancel(svc: &Services, id: i64) -> Result<()> {
-    let mut ticket = svc.store.get(id)?.context("no such ticket")?;
-    ticket.state = State::Cancelled;
-    svc.store.save(&ticket)?;
+    actions::cancel(svc, id)?;
     println!("ticket {id} cancelled; a running daemon stops it at once");
     Ok(())
 }

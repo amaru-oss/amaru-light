@@ -6,6 +6,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
 COPY prompts/ prompts/
+COPY web/ web/
 RUN cargo build --release --locked --bin amaru
 
 # ripwire (https://github.com/redhat-et/ripwire), a code map tool that lets
@@ -48,5 +49,7 @@ RUN chmod +x entrypoint \
 ENV HOME=/home/mini-amaru
 USER mini-amaru
 VOLUME ["/data"]
+# The web interface, with `web.listen: 0.0.0.0:8765` in amaru.yaml.
+EXPOSE 8765
 ENTRYPOINT ["/app/entrypoint"]
 CMD ["--config", "/config/amaru.yaml", "serve"]

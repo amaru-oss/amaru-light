@@ -142,6 +142,8 @@ mod tests {
             args: vec![],
             model: None,
             env: BTreeMap::new(),
+            login: None,
+            login_status: None,
         })
     }
 

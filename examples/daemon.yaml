@@ -5,6 +5,8 @@ poll_interval: 60s
 max_parallel: 2          # tickets in progress at once (1 or 2)
 gh: gh
 bot_login: amaru-bot     # optional; its own comments never count as review feedback
+web:
+  listen: 127.0.0.1:8765 # the web interface; 0.0.0.0:8765 in a container
 
 agents:
   claude:

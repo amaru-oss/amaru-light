@@ -72,6 +72,8 @@ mod tests {
             args: vec!["--permission-mode".into(), "bypassPermissions".into()],
             model: Some("sonnet".into()),
             env: std::collections::BTreeMap::new(),
+            login: None,
+            login_status: None,
         }
     }
 

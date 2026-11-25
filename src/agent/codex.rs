@@ -67,6 +67,8 @@ mod tests {
             args: vec![],
             model: None,
             env: std::collections::BTreeMap::new(),
+            login: None,
+            login_status: None,
         };
         let args = Codex.args(
             &Turn {

@@ -1,9 +1,9 @@
 #!/bin/sh
 # Smoke test for the base image. It checks the tools and the user, then
 # starts the daemon with the example settings and checks that it keeps
-# running, that the entrypoint activated the ripwire skills, and that it
-# created its database. Run it from the repository root, or use
-# `make image-check`.
+# running, that the entrypoint activated the ripwire skills, that it
+# created its database and that the web interface answers. Run it from the
+# repository root, or use `make image-check`.
 #
 # Usage: scripts/test-image.sh [image]
 # Environment: RUNTIME (podman or docker; default podman if installed).
@@ -35,7 +35,8 @@ done
 # Start the daemon on the example settings, with the state on /data. With no
 # token every poll fails, which the daemon must survive.
 "$RUNTIME" run -d --name "$name" --entrypoint /bin/sh "$image" -c '
-    sed "s|^state_dir: .*|state_dir: /data|" /app/examples/daemon.yaml > /config/amaru.yaml
+    sed -e "s|^state_dir: .*|state_dir: /data|" -e "s|^  listen: 127.0.0.1:|  listen: 0.0.0.0:|" \
+        /app/examples/daemon.yaml > /config/amaru.yaml
     cp /app/examples/project.yaml /config/project.yaml
     exec /app/entrypoint --config /config/amaru.yaml serve' >/dev/null
 
@@ -56,5 +57,11 @@ sleep 3
     || fail "the entrypoint did not activate the ripwire skills for Claude Code"
 "$RUNTIME" exec "$name" test -d /home/mini-amaru/.agents/skills \
     || fail "the entrypoint did not activate the ripwire skills for Codex"
+
+# The web interface, asked from inside the container with bash alone.
+"$RUNTIME" exec "$name" bash -c '
+    exec 3<>/dev/tcp/127.0.0.1/8765
+    printf "GET /api/health HTTP/1.0\r\n\r\n" >&3
+    cat <&3' | grep -q '"ok":true' || fail "the web interface does not answer on port 8765"
 
 printf 'OK: %s\n' "$image"
