@@ -1,5 +1,5 @@
 [package]
-name = "mini-amaru"
+name = "amaru-light"
 version = "0.1.0"
 edition = "2024"
 description = "Personal daemon that turns GitHub issues into pull requests with agent CLIs"
