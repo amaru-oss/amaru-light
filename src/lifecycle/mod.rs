@@ -122,8 +122,16 @@ impl<'a> Job<'a> {
         self.svc.store.event(self.ticket.id, kind, payload)
     }
 
+    /// Write a progress line to the daemon log.
+    fn log(&self, message: &str) {
+        crate::scheduler::log(&format!("{}: {message}", self.ticket.reference()));
+    }
+
     fn transition(&mut self, next: State) -> Result<()> {
         let from = self.ticket.state;
+        if from != next {
+            self.log(&format!("{from} -> {next}"));
+        }
         self.ticket.state = next;
         self.save()?;
         self.event("STATE", &json!({ "from": from, "to": next }))
