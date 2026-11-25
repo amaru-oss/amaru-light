@@ -57,6 +57,7 @@ impl Job<'_> {
 
     pub(super) async fn create_worktree(&mut self) -> Result<State> {
         let target = self.target();
+        self.log(&format!("syncing {}", target.upstream));
         self.svc.workspace.sync(&target).await?;
         let branch = self.ticket.branch.clone().context("ticket has no branch")?;
         let path = self
@@ -151,9 +152,15 @@ impl Job<'_> {
     pub(super) async fn check(&mut self) -> Result<State> {
         let worktree = self.worktree()?;
         let cancel = self.cancel.clone();
+        self.log("running the checks");
         let Some(failure) = checks::run(&self.project.checks, &worktree, cancel).await? else {
+            self.log("checks passed");
             return Ok(self.after_checks());
         };
+        self.log(&format!(
+            "check `{}` failed ({})",
+            failure.name, failure.exit
+        ));
         self.event("CHECK_FAILED", &serde_json::to_value(&failure)?)?;
         self.next_fix_round(&failure)?;
         let vars = [

@@ -35,6 +35,7 @@ impl Job<'_> {
         prompt: &str,
         session: Option<&str>,
     ) -> Result<TurnResult> {
+        let agent_name = agent;
         let agent = Agent::new(self.svc.settings.agent(agent)?.clone());
         let cwd = self.worktree()?;
         let place = Workplace {
@@ -43,20 +44,43 @@ impl Job<'_> {
             cancel: self.cancel.clone(),
         };
         let (store, id) = (&self.svc.store, self.ticket.id);
+        let how = session.map_or_else(|| "new session".to_owned(), |s| format!("session {s}"));
+        self.log(&format!("{agent_name} turn started ({how})"));
         let result = agent
             .run(&Turn { prompt, session }, place, &mut |event| {
+                if let AgentEvent::Tool(tool) = event {
+                    self.log(&format!("{agent_name} uses {tool}"));
+                }
                 if let Some((kind, payload)) = event_payload(event) {
                     // The event log is best effort; the turn result is what counts.
                     let _ = store.event(id, kind, &payload);
                 }
             })
             .await?;
+        self.record_turn(agent_name, &result)?;
+        Ok(result)
+    }
+
+    /// Log the end of an agent turn and record it as an event.
+    fn record_turn(&self, agent: &str, result: &TurnResult) -> Result<()> {
+        let cost = result
+            .cost_usd
+            .map(|c| format!(", ${c:.2}"))
+            .unwrap_or_default();
+        let turns = result
+            .turns
+            .map(|t| format!(", {t} turns"))
+            .unwrap_or_default();
+        let exit = result
+            .exit
+            .as_ref()
+            .map_or_else(|| "no exit".to_owned(), |e| format!("{e:?}"));
+        self.log(&format!("{agent} turn ended ({exit}{turns}{cost})"));
         self.event(
             "AGENT_TURN",
             &json!({ "exit": format!("{:?}", result.exit), "error": result.is_error,
                      "cost_usd": result.cost_usd, "turns": result.turns }),
-        )?;
-        Ok(result)
+        )
     }
 
     /// The prompt that rebuilds context when a session cannot be resumed.
