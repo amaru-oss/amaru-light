@@ -9,6 +9,7 @@ fn shell(login: &str, status: &str) -> AgentSettings {
         model: None,
         env: std::iter::once(("GREETING".to_owned(), "hello".to_owned())).collect(),
         login: Some(vec!["-c".to_owned(), login.to_owned()]),
+        login_with_key: None,
         login_status: Some(vec!["-c".to_owned(), status.to_owned()]),
     }
 }
@@ -32,7 +33,7 @@ async fn passes_input_to_the_sign_in() {
         "echo \"$GREETING, visit https://example.test\"; read code; echo \"got $code\"",
         "true",
     );
-    let view = logins.start("codex", &agent).unwrap();
+    let view = logins.start("codex", &agent, None).await.unwrap();
     assert!(view.running);
     logins.input("codex", "abc-123\n").await.unwrap();
     let view = ended(&logins, "codex").await;
@@ -47,10 +48,36 @@ async fn passes_input_to_the_sign_in() {
 }
 
 #[tokio::test]
+async fn passes_the_key_and_closes_stdin() {
+    let logins = Logins::default();
+    let mut agent = shell("true", "true");
+    // Like `codex login --with-api-key`: read to the end of input.
+    agent.login_with_key = Some(vec![
+        "-c".to_owned(),
+        "key=$(cat); echo \"read ${#key} characters\"".to_owned(),
+    ]);
+    logins
+        .start("codex", &agent, Some(" sk-secret-123 "))
+        .await
+        .unwrap();
+    let view = ended(&logins, "codex").await;
+    assert_eq!(view.exit.as_deref(), Some("finished"));
+    assert!(
+        view.output.contains("read 13 characters"),
+        "{}",
+        view.output
+    );
+    assert!(!view.output.contains("sk-secret"));
+    agent.login_with_key = Some(Vec::new());
+    assert!(logins.start("codex", &agent, Some("k")).await.is_err());
+}
+
+#[tokio::test]
 async fn stops_a_sign_in() {
     let logins = Logins::default();
     logins
-        .start("codex", &shell("sleep 30 & sleep 30", "true"))
+        .start("codex", &shell("sleep 30 & sleep 30", "true"), None)
+        .await
         .unwrap();
     logins.cancel("codex").unwrap();
     assert_eq!(
@@ -71,7 +98,7 @@ async fn reports_the_status() {
     let mut missing = shell("true", "true");
     missing.command = "/nonexistent/agent".to_owned();
     assert_eq!(status(&missing).await.signed_in, None);
-    assert!(Logins::default().start("x", &missing).is_err());
+    assert!(Logins::default().start("x", &missing, None).await.is_err());
 }
 
 #[test]
@@ -80,9 +107,11 @@ fn defaults_follow_the_driver() {
     agent.login = None;
     agent.login_status = None;
     assert_eq!(agent.login_args(), ["login", "--device-auth"]);
+    assert_eq!(agent.key_login_args(), ["login", "--with-api-key"]);
     assert_eq!(agent.status_args(), ["login", "status"]);
     agent.driver = DriverKind::Claude;
     assert_eq!(agent.login_args(), ["auth", "login"]);
+    assert!(agent.key_login_args().is_empty());
     assert_eq!(agent.status_args(), ["auth", "status", "--text"]);
 }
 

@@ -100,10 +100,25 @@ impl Logins {
     }
 
     /// Start signing `name` in, stopping a sign-in already running for it.
-    pub fn start(&self, name: &str, agent: &AgentSettings) -> Result<LoginView> {
-        let args = agent.login_args();
+    /// With `key`, run the API-key sign-in instead: the key goes to stdin,
+    /// which is then closed. The key is never kept or shown.
+    pub async fn start(
+        &self,
+        name: &str,
+        agent: &AgentSettings,
+        key: Option<&str>,
+    ) -> Result<LoginView> {
+        let args = match key {
+            Some(_) => agent.key_login_args(),
+            None => agent.login_args(),
+        };
         if args.is_empty() {
-            bail!("signing in from the page is turned off for agent {name}");
+            let how = if key.is_some() {
+                "with an API key "
+            } else {
+                ""
+            };
+            bail!("signing in {how}from the page is turned off for agent {name}");
         }
         let child = command(agent, &args)
             .stdin(Stdio::piped())
@@ -112,6 +127,9 @@ impl Logins {
         let login = watch(child);
         if let Some(old) = self.map().insert(name.to_owned(), Arc::clone(&login)) {
             old.stop.notify_one();
+        }
+        if let Some(key) = key {
+            send_key(&login, key).await?;
         }
         Ok(login.view())
     }
@@ -138,6 +156,18 @@ impl Logins {
         login.stop.notify_one();
         Ok(())
     }
+}
+
+/// Write the key and close stdin, so that the CLI sees the end of input.
+async fn send_key(login: &Login, key: &str) -> Result<()> {
+    let pipe = login.stdin.lock().await.take();
+    let mut pipe = pipe.context("the sign-in has no input")?;
+    let line = format!("{}\n", key.trim());
+    pipe.write_all(line.as_bytes())
+        .await
+        .context("cannot pass the key to the sign-in")?;
+    pipe.shutdown().await.ok();
+    Ok(())
 }
 
 /// Run the agent's status command.

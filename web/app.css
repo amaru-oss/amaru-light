@@ -408,6 +408,9 @@ pre {
 .login-head { font-size: 14px; }
 .login-input { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .login-input input { flex: 1; min-width: 200px; font-family: var(--mono); }
+.key-form { margin-top: 12px; }
+.key-form[hidden] { display: none; }
+.key-note { flex-basis: 100%; margin: 0; font-size: 13px; }
 
 .tag {
   display: inline-block;

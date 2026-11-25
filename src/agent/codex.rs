@@ -68,6 +68,7 @@ mod tests {
             model: None,
             env: std::collections::BTreeMap::new(),
             login: None,
+            login_with_key: None,
             login_status: None,
         };
         let args = Codex.args(
