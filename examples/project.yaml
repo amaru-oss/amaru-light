@@ -6,7 +6,7 @@ branch_prefix: amaru/
 
 intake:
   labels: [amaru]          # issues with any of these labels are eligible
-  assignee: amaru-bot      # and/or issues assigned to the bot
+  assignee: amaru-bot      # and/or issues assigned to the bot (it needs access to the repo)
   skip_labels: [amaru:hold, needs-human]
   priority_labels: [priority:high, priority:medium]
 

@@ -4,7 +4,7 @@ state_dir: data          # relative to this file
 poll_interval: 60s
 max_parallel: 2          # tickets in progress at once (1 or 2)
 gh: gh
-bot_login: amaru-bot     # optional, used by intake.assignee selectors
+bot_login: amaru-bot     # optional; its own comments never count as review feedback
 
 agents:
   claude:
@@ -14,6 +14,13 @@ agents:
     # The agent runs unattended in its own worktree; it must be able to run
     # the project's build and tests without asking.
     args: [--permission-mode, bypassPermissions]
+  # Codex instead of, or next to, Claude Code. In a container, the container
+  # is the sandbox; --full-auto keeps Codex's own sandbox, which blocks the
+  # network that most builds need.
+  # codex:
+  #   driver: codex
+  #   command: codex
+  #   args: [--dangerously-bypass-approvals-and-sandbox]
 
 projects:
   - project.yaml

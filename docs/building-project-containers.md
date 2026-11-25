@@ -54,8 +54,17 @@ USER root
 RUN microdnf install -y golang make && microdnf clean all
 COPY --chmod=755 my-agent /usr/local/bin/my-agent
 
+# Git over HTTPS asks gh for credentials, and gh reads GH_TOKEN. This is what
+# `gh auth setup-git` writes, set here so that no step is needed at run time.
+RUN git config --system credential.https://github.com.helper '' \
+    && git config --system --add credential.https://github.com.helper '!/usr/bin/gh auth git-credential'
+
 USER mini-amaru
 ```
+
+Agent CLIs distributed through npm, such as Claude Code
+(`@anthropic-ai/claude-code`) and Codex (`@openai/codex`), need Node.js in
+the image. Codex also uses `bubblewrap` when it keeps its own sandbox.
 
 Only copy the files the image needs. Add a `.containerignore` if the context
 contains a checkout, dependency caches, local environment files, or other
@@ -64,20 +73,37 @@ them without administrative access.
 
 ## Configure the daemon
 
-Write `amaru.yaml` and `project.yaml` from the files in
-[`examples/`](../examples) and keep them outside the image, in a directory
-mounted at `/config`:
+Write the daemon file, `amaru.yaml`, and a project file from the files in
+[`examples/`](../examples). The [configuration reference](configuration.md)
+describes every key.
 
-- In `amaru.yaml`, set `state_dir: /data` and define the agent CLI that the
-  image installs. `command` is the executable on the container's `PATH` or
-  an absolute path. Add the arguments that let it run unattended, for
-  example `--permission-mode bypassPermissions` for Claude Code.
-- In `project.yaml`, set `repo`, and `fork` if the bot pushes to a fork.
-  Set `checks` to the project's real validation commands; they run through
+- In `amaru.yaml`, define the agent CLI that the image installs. `command`
+  is the executable on the container's `PATH` or an absolute path. Add the
+  arguments that let it run unattended, for example
+  `[--permission-mode, bypassPermissions]` for Claude Code or
+  `[--dangerously-bypass-approvals-and-sandbox]` for Codex.
+- In the project file, set `repo`, `fork` if the bot pushes to a fork, and
+  `checks` to the project's real validation commands. They run through
   `sh -c` in the ticket's worktree.
+- Set `state_dir` to a volume. The base image declares `/data` for it. To
+  keep everything, state and agent logins, in one home volume, use
+  `state_dir: /home/mini-amaru/amaru` instead.
 
-The daemon clones each repository into `/data/repos` on first use, through
-`gh`, and keeps one worktree per ticket next to it.
+The image runs `amaru --config /config/amaru.yaml serve` by default. Put the
+two files in `/config` one of two ways:
+
+- Mount a host directory at `/config` (read only is fine). A settings
+  change then needs only a container restart.
+- Copy them into the image, so that the image is self-contained. Then
+  rebuild after each change:
+
+  ```dockerfile
+  COPY --chown=mini-amaru:mini-amaru amaru.yaml project.yaml /config/
+  ```
+
+The daemon clones each repository into `<state_dir>/repos` when its first
+ticket starts and keeps one worktree per ticket next to the clone. For the
+GitHub token, the fork and labels, see [GitHub access](github-access.md).
 
 ## Build, run, and verify
 
@@ -95,9 +121,15 @@ podman exec amaru-light-my-project /app/bin/amaru -c /config/amaru.yaml doctor
 podman logs -f amaru-light-my-project
 ```
 
-The volumes hold the daemon state (database, mirrors and worktrees) and the
-runtime user's home directory. Use project-specific volume names. The
-default command is `--config /config/amaru.yaml serve`.
+The volumes hold the daemon state (database, clones and worktrees) and the
+runtime user's home directory. Use project-specific volume names, and use
+named volumes rather than host directories for them. Leave out the `/config`
+mount if the image copies the settings. The container publishes no port:
+the daemon has no web interface.
+
+`-e GH_TOKEN` without a value copies the variable from your shell, so the
+token does not show in the command line or the shell history. The volumes do
+not store it; give it again when you recreate the container.
 
 ### Sign in to the agent from inside the container
 
@@ -106,7 +138,7 @@ Once the container is running, the user signs in with the installed CLI as
 `mini-amaru`. Reuse the same volume when recreating the container so file-based
 login state persists. If the image sets `CODEX_HOME` or `CLAUDE_CONFIG_DIR`,
 keep that directory on the volume and use the same setting for both login
-and jobs.
+and the daemon.
 
 For Codex with a ChatGPT account, use device login and open the displayed
 URL in a host browser. Device login must be enabled for the account or
@@ -136,8 +168,9 @@ secret mechanism. Keep credentials out of the image and committed YAML.
 
 1. Run `amaru doctor`. It checks the settings, Git, `gh auth status` with
    the bot token, and that each configured agent CLI starts.
-2. Check the selected agent's login status as the runtime user. Run
-   `gh auth setup-git` once so Git pushes with the bot token.
+2. Check the selected agent's login status as the runtime user. If the
+   image does not set the Git credential helper, run `gh auth setup-git`
+   once so that Git pushes with the bot token.
 3. Verify that dependency caches are writable and dependency hosts resolve
    from the agent's execution environment. Run the project's check commands
    in a clone. If an agent uses its own sandbox, repeat these checks through
