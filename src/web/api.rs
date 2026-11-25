@@ -71,6 +71,8 @@ pub(super) type ApiResult<T> = Result<Json<T>, ApiError>;
 struct TicketView {
     #[serde(flatten)]
     listed: Listed,
+    /// `owner/name#42` or the Jira key.
+    reference: String,
     issue_url: String,
     pr_url: Option<String>,
     branch_url: Option<String>,
@@ -78,7 +80,10 @@ struct TicketView {
 
 fn view(svc: &Services, listed: Listed) -> TicketView {
     let t = &listed.ticket;
-    let issue_url = format!("https://github.com/{}/issues/{}", t.repo, t.number);
+    let issue_url = svc.settings.project(&t.repo).map_or_else(
+        || format!("https://github.com/{}/issues/{}", t.repo, t.number),
+        |p| p.issue_url(t.number),
+    );
     let pr_url = t
         .pr_number
         .map(|n| format!("https://github.com/{}/pull/{n}", t.repo));
@@ -92,6 +97,7 @@ fn view(svc: &Services, listed: Listed) -> TicketView {
         .as_ref()
         .map(|b| format!("https://github.com/{push_repo}/tree/{b}"));
     TicketView {
+        reference: listed.ticket.reference(),
         listed,
         issue_url,
         pr_url,
@@ -107,6 +113,7 @@ fn project(p: &ProjectSettings) -> Value {
     json!({
         "repo": p.repo,
         "fork": p.fork,
+        "jira": p.jira.as_ref().map(|j| format!("{} ({})", j.project, j.url)),
         "base_branch": p.base_branch,
         "agent": p.agent,
         "labels": p.intake.labels,

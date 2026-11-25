@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use mini_amaru::{
     actions::{self, Claimed},
     app::services,
+    forge::jira::{Curl, Jira},
     lifecycle::Services,
     process,
     scheduler::{Intake, Scheduler},
@@ -77,7 +78,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
     let svc = services(&cli.config)?;
     match cli.command {
         Command::Serve => run(svc, Intake::Autonomous, true).await,
-        Command::Claim { issue, now } => claim(svc, &issue, now).await,
+        Command::Claim { issue, now } => Box::pin(claim(svc, &issue, now)).await,
         Command::Drain { repo, milestone } => {
             run(svc, Intake::Milestone { repo, milestone }, false).await
         }
@@ -173,6 +174,31 @@ async fn probe(label: &str, program: &str, args: &[&str]) -> bool {
     result.is_ok()
 }
 
+/// Reach every Jira server the projects use, with their tokens.
+async fn check_jira(settings: &mini_amaru::settings::Settings) -> bool {
+    let mut ok = true;
+    let jira: Vec<_> = settings
+        .projects
+        .iter()
+        .filter_map(|p| p.jira.clone())
+        .collect();
+    if !jira.is_empty() {
+        ok &= probe("curl", "curl", &["--version"]).await;
+    }
+    let http = std::sync::Arc::new(Curl::default());
+    for config in jira {
+        let label = format!("jira {}", config.project);
+        match Jira::new(config, http.clone()).check().await {
+            Ok(text) => println!("ok    {label}: {text}"),
+            Err(e) => {
+                println!("FAIL  {label}: {e:#}");
+                ok = false;
+            }
+        }
+    }
+    ok
+}
+
 async fn doctor(config: &std::path::Path) -> Result<()> {
     let settings = mini_amaru::settings::Settings::load(config)?;
     println!("ok    settings: {} project(s)", settings.projects.len());
@@ -181,6 +207,7 @@ async fn doctor(config: &std::path::Path) -> Result<()> {
     for (name, agent) in &settings.daemon.agents {
         ok &= probe(&format!("agent {name}"), &agent.command, &["--version"]).await;
     }
+    ok &= check_jira(&settings).await;
     if !ok {
         bail!("some checks failed");
     }

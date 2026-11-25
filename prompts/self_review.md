@@ -1,4 +1,4 @@
-Review the changes on branch `{{branch}}` against `{{base}}` for issue #{{number}} of {{repo}}: {{title}}
+Review the changes on branch `{{branch}}` against `{{base}}` for issue {{issue}} of {{repo}}: {{title}}
 
 {{body}}
 

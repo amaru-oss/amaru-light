@@ -33,6 +33,7 @@ fn to_issue(raw: &Value) -> Option<Issue> {
     }
     Some(Issue {
         number: raw["number"].as_u64()?,
+        key: None,
         title: text(&raw["title"]),
         body: text(&raw["body"]),
         labels: names(&raw["labels"], "name"),

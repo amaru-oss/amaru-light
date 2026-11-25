@@ -1,6 +1,6 @@
 You are continuing work that an earlier session started but which can no longer be resumed.
 
-Issue #{{number}} of {{repo}}: {{title}}
+Issue {{issue}} of {{repo}}: {{title}}
 
 {{body}}
 

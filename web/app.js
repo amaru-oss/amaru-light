@@ -144,7 +144,7 @@ async function showTickets() {
   const counts = h("div", { class: "counts" });
   const list = h("div", { class: "card list" }, h("div", { class: "empty" }, "Loading…"));
   const input = h("input", {
-    type: "text", name: "issue", placeholder: "owner/name#42 or issue URL",
+    type: "text", name: "issue", placeholder: "owner/name#42, issue URL or Jira key",
     "aria-label": "Issue to claim", autocomplete: "off", spellcheck: "false",
   });
   const button = h("button", { type: "submit" }, "Claim");
@@ -204,7 +204,7 @@ function row(t) {
     h("span", { class: "id" }, t.id),
     h("span", { class: "title" },
       h("b", {}, t.title || "(untitled)"),
-      h("small", {}, `${t.repo}#${t.number}`),
+      h("small", {}, `${t.reference}`),
       t.state === "BLOCKED" && t.reason ? h("span", { class: "why" }, firstLine(t.reason)) : null),
     badge(t.state),
     h("span", { class: "pr" }, t.pr_number ? `#${t.pr_number}` : "—"),
@@ -220,8 +220,8 @@ async function claim(event, input, button, message) {
     const result = await api("/api/tickets", { method: "POST", body: JSON.stringify({ issue }) });
     const t = result.ticket;
     const text = result.outcome === "queued"
-      ? `Queued ${t.repo}#${t.number} as ticket ${t.id}.`
-      : `${t.repo}#${t.number} already has ticket ${t.id} (${label(t.state)}).`;
+      ? `Queued ${t.reference} as ticket ${t.id}.`
+      : `${t.reference} already has ticket ${t.id} (${label(t.state)}).`;
     message.replaceChildren(h("p", { class: "notice" }, text, " ", h("a", { href: `#/tickets/${t.id}` }, "Open it")));
     input.value = "";
   } catch (error) {
@@ -284,7 +284,7 @@ function drawTop(container, t, refresh) {
     h("div", { class: "head" },
       h("div", {},
         h("h1", {}, t.title || "(untitled)"),
-        h("p", { class: "sub" }, `${t.repo}#${t.number} · `, badge(t.state)),
+        h("p", { class: "sub" }, `${t.reference} · `, badge(t.state)),
         h("div", { class: "links" },
           h("a", { href: t.issue_url, target: "_blank", rel: "noopener" }, "Issue ↗"),
           t.pr_url ? h("a", { href: t.pr_url, target: "_blank", rel: "noopener" }, `Pull request #${t.pr_number} ↗`) : null,
@@ -434,6 +434,7 @@ async function showProjects() {
     h("p", { class: "sub" }, p.fork ? `Pushes to the fork ${p.fork}` : "Pushes to the repository"),
     h("div", { class: "facts" }, h("dl", {},
       fact("Base branch", h("code", {}, p.base_branch)),
+      fact("Tickets from", p.jira ? `Jira ${p.jira}` : "GitHub issues"),
       fact("Agent", p.agent),
       fact("Picks up labels", p.labels.length ? p.labels.map((l) => h("span", { class: "tag" }, l)) : "—"),
       fact("Picks up assignee", p.assignee || "—"),

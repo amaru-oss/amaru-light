@@ -185,12 +185,36 @@ impl Job<'_> {
         }
     }
 
+    /// `#42`, or the Jira key, for prompts.
+    pub(super) fn issue_name(&self) -> String {
+        let t = &self.ticket;
+        t.key.clone().unwrap_or_else(|| format!("#{}", t.number))
+    }
+
     /// Placeholders that describe the ticket's issue and branch.
     pub(super) fn issue_vars(&self) -> Vec<(String, String)> {
         let t = &self.ticket;
+        let latest = match &t.key {
+            Some(_) => format!(
+                "The issue as it reads now, with its comments:\n\n{}",
+                t.body
+            ),
+            None => format!(
+                "Read the issue's latest comments with\n`gh issue view {} --repo {} --comments`.",
+                t.number, t.repo
+            ),
+        };
+        let conventions = t.key.as_ref().map_or_else(String::new, |key| {
+            format!(
+                "\n- The issue is {key} in Jira. Start the subject of every commit message with `{key}: `, as the project requires."
+            )
+        });
         vec![
             ("repo".into(), t.repo.clone()),
             ("number".into(), t.number.to_string()),
+            ("issue".into(), self.issue_name()),
+            ("latest".into(), latest),
+            ("conventions".into(), conventions),
             ("title".into(), t.title.clone()),
             ("body".into(), t.body.clone()),
             ("branch".into(), t.branch.clone().unwrap_or_default()),

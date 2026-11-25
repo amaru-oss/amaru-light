@@ -47,10 +47,7 @@ impl Scheduler {
         };
         for issue in issues {
             if self.can_start(project, &issue)?
-                && let Some(ticket) =
-                    self.svc
-                        .store
-                        .claim(&project.repo, issue.number, &issue.title, origin)?
+                && let Some(ticket) = self.svc.store.claim_issue(&project.repo, &issue, origin)?
             {
                 log(&format!("claimed {}", ticket.reference()));
             }
@@ -63,6 +60,11 @@ impl Scheduler {
     fn can_start(&self, project: &ProjectSettings, issue: &Issue) -> Result<bool> {
         let store = &self.svc.store;
         if !issue.open || store.open_ticket(&project.repo, issue.number)?.is_some() {
+            return Ok(false);
+        }
+        // A Jira issue often stays open after its pull request is merged,
+        // until someone resolves it; it must not be worked on again.
+        if project.jira.is_some() && store.was_done(&project.repo, issue.number)? {
             return Ok(false);
         }
         let skipped = project

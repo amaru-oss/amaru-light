@@ -80,7 +80,7 @@ mod tests {
         let prompts = Prompts::default();
         let text = prompts.render(
             "implement",
-            &[("number", "7"), ("repo", "me/app"), ("title", "T")],
+            &[("issue", "#7"), ("repo", "me/app"), ("title", "T")],
         );
         assert!(text.starts_with("You are working on issue #7 of me/app"));
         assert!(text.contains(".amaru/result.json"));

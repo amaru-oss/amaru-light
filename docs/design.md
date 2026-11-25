@@ -85,7 +85,7 @@ session. A ticket in `AWAITING_REVIEW` does not use a worker slot.
 | Component | Responsibility | First implementation |
 | --- | --- | --- |
 | `Scheduler` | Watchers, queue, worker slots, state machines | — |
-| `TicketSource` | List, claim, comment, label, dependencies | GitHub via `gh` |
+| `TicketSource` | List, claim, comment, label, dependencies | GitHub via `gh`; Jira via its REST API and `curl`, chosen per project |
 | `Forge` | Push, open PRs, read reviews and checks, reply | GitHub via `gh` |
 | `AgentDriver` | Start, resume, stream events, usage, cancel | Claude Code; Codex next |
 | `Workspace` | Repository mirror, one worktree per ticket, retention | git worktree |

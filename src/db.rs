@@ -120,6 +120,23 @@ impl Store {
         Ok(Some(ticket))
     }
 
+    /// Queue an issue as `claim` does, keeping its Jira key.
+    pub fn claim_issue(
+        &self,
+        repo: &str,
+        issue: &crate::forge::Issue,
+        origin: Origin,
+    ) -> Result<Option<Ticket>> {
+        let Some(mut ticket) = self.claim(repo, issue.number, &issue.title, origin)? else {
+            return Ok(None);
+        };
+        if issue.key.is_some() {
+            ticket.key.clone_from(&issue.key);
+            self.save(&ticket)?;
+        }
+        Ok(Some(ticket))
+    }
+
     pub fn save(&self, ticket: &Ticket) -> Result<()> {
         let data = serde_json::to_string(ticket)?;
         self.with(|c| {
@@ -153,6 +170,18 @@ impl Store {
                 .optional()?)
         })?;
         data.as_deref().map(decode).transpose()
+    }
+
+    /// Whether a ticket for the issue reached DONE: its pull request merged.
+    pub fn was_done(&self, repo: &str, number: u64) -> Result<bool> {
+        self.with(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS (SELECT 1 FROM tickets WHERE repo = ?1 COLLATE NOCASE
+                 AND number = ?2 AND state = ?3)",
+                params![repo, number, State::Done.as_str()],
+                |r| r.get(0),
+            )?)
+        })
     }
 
     fn query(&self, sql: &str, limit: i64) -> Result<Vec<Ticket>> {
@@ -273,15 +302,36 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(!store.was_done("me/demo", 7).unwrap());
         let mut done = ticket;
         done.state = State::Done;
         store.save(&done).unwrap();
+        assert!(store.was_done("ME/demo", 7).unwrap());
         assert!(
             store
                 .claim("me/demo", 7, "Again", Origin::Manual)
                 .unwrap()
                 .is_some()
         );
+    }
+
+    #[test]
+    fn keeps_the_jira_key_of_a_claimed_issue() {
+        let (_dir, store) = store();
+        let issue = crate::forge::Issue {
+            number: 12,
+            key: Some("CAMEL-12".into()),
+            title: "T".into(),
+            ..crate::forge::Issue::default()
+        };
+        let ticket = store
+            .claim_issue("apache/camel", &issue, Origin::Manual)
+            .unwrap()
+            .unwrap();
+        let stored = store.get(ticket.id).unwrap().unwrap();
+        assert_eq!(stored.key.as_deref(), Some("CAMEL-12"));
+        assert_eq!(stored.reference(), "CAMEL-12");
+        assert_eq!(stored.label(), "CAMEL-12");
     }
 
     #[test]

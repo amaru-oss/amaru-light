@@ -90,12 +90,16 @@ pub enum Origin {
     Autonomous,
 }
 
-/// One GitHub issue being worked on.
+/// One issue being worked on: a GitHub issue of `repo`, or a Jira issue of
+/// the project that `repo` belongs to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Ticket {
     pub id: i64,
     pub repo: String,
     pub number: u64,
+    /// The Jira key, such as `CAMEL-12345`, when the issue lives in Jira.
+    #[serde(default)]
+    pub key: Option<String>,
     pub title: String,
     /// The issue body when the ticket was prepared.
     #[serde(default)]
@@ -145,6 +149,7 @@ impl Ticket {
             id,
             repo,
             number,
+            key: None,
             title,
             body: String::new(),
             origin,
@@ -179,9 +184,17 @@ impl Ticket {
         })
     }
 
-    /// `owner/name#42`, for logs and comments.
+    /// `owner/name#42` or the Jira key, for logs and comments.
     pub fn reference(&self) -> String {
-        format!("{}#{}", self.repo, self.number)
+        self.key
+            .clone()
+            .unwrap_or_else(|| format!("{}#{}", self.repo, self.number))
+    }
+
+    /// What branch names and pull request titles start with: the issue
+    /// number, or the Jira key.
+    pub fn label(&self) -> String {
+        self.key.clone().unwrap_or_else(|| self.number.to_string())
     }
 }
 

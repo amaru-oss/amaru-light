@@ -6,7 +6,7 @@ offers the same actions as the command line:
 
 - **Tickets**: every ticket with its state, pull request and last change.
   The counters filter the list: in progress, awaiting review, needing you,
-  finished. Paste an issue (`owner/name#42` or its URL) to claim it, as
+  finished. Paste an issue (`owner/name#42`, its URL, or a Jira key such as `CAMEL-12345`) to claim it, as
   `amaru claim` does.
 - **A ticket**: its links (issue, pull request, branch), the reason it is
   blocked, and a timeline of everything the daemon and the agent did: state
