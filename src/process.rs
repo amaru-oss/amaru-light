@@ -70,7 +70,11 @@ pub(crate) fn kill_group(child: &Child) {
     }
 }
 
-fn spawn(spec: &Spec) -> Result<Child> {
+/// Start the process. A script that was just written can still be open for
+/// writing in a child forked meanwhile by another thread (until that child
+/// execs), and `exec` then fails with "Text file busy"; that passes, so it is
+/// retried a few times.
+async fn spawn(spec: &Spec) -> Result<Child> {
     let mut command = Command::new(&spec.program);
     command
         .args(&spec.args)
@@ -81,9 +85,16 @@ fn spawn(spec: &Spec) -> Result<Child> {
         .stderr(Stdio::piped())
         .process_group(0)
         .kill_on_drop(true);
-    command
-        .spawn()
-        .with_context(|| format!("cannot start {}", spec.program))
+    let mut attempt = 0;
+    loop {
+        match command.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 5 => {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(20 * attempt)).await;
+            }
+            other => return other.with_context(|| format!("cannot start {}", spec.program)),
+        }
+    }
 }
 
 async fn pump(stdout: ChildStdout, on_line: &mut (dyn FnMut(&str) + Send)) -> Result<()> {
@@ -133,7 +144,7 @@ pub async fn run(
     cancel: Option<Cancel>,
     on_line: &mut (dyn FnMut(&str) + Send),
 ) -> Result<Output> {
-    let mut child = spawn(spec)?;
+    let mut child = spawn(spec).await?;
     let (stdout, feeder, errors) = start_io(&mut child, spec.stdin.clone().unwrap_or_default())?;
     let work = async {
         pump(stdout, on_line).await?;
