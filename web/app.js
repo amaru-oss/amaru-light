@@ -401,6 +401,9 @@ function eventItem(e) {
     case "LABEL_SKIPPED":
       body = `Could not add the ${p.label} label; going on without it`;
       break;
+    case "REACTION_SKIPPED":
+      body = `Could not react to ${p.feedback}; going on without it`;
+      break;
     default:
       body = h("code", {}, JSON.stringify(p));
   }

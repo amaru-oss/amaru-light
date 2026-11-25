@@ -25,6 +25,7 @@ review:
   reviewers: [my-user]     # only these logins' feedback reaches the agent
   max_rounds: 5
   fix_ci: true
+  reaction: thumbs_up      # emoji on each comment picked up; off for none
 
 workspace:
   keep_blocked: 7d         # e.g. 0, 7d or forever

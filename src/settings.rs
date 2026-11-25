@@ -4,6 +4,7 @@
 //! project file per repository. Both reject unknown keys, so a typo is an
 //! error instead of a silent default.
 
+use crate::forge::Reaction;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -264,6 +265,9 @@ pub struct ReviewSettings {
     /// Treat failing check runs on the pull request as review feedback.
     #[serde(default = "yes")]
     pub fix_ci: bool,
+    /// The emoji put on each review and comment the agent picks up.
+    #[serde(default)]
+    pub reaction: Reaction,
 }
 
 impl Default for ReviewSettings {
@@ -275,6 +279,7 @@ impl Default for ReviewSettings {
             reviewers: Vec::new(),
             max_rounds: default_review_rounds(),
             fix_ci: true,
+            reaction: Reaction::default(),
         }
     }
 }
@@ -480,10 +485,26 @@ mod tests {
         assert_eq!(project.base_branch, "main");
         assert_eq!(project.review.self_review, SelfReview::Off);
         assert!(project.review.respond);
+        assert_eq!(project.review.reaction, Reaction::ThumbsUp);
         assert_eq!(
             project.workspace.keep_blocked,
             Retention::For(Duration::from_secs(604_800))
         );
+    }
+
+    #[test]
+    fn reads_the_review_reaction() {
+        let eyes = format!("{PROJECT}review:\n  reaction: eyes\n");
+        let settings = load(DAEMON, &eyes).unwrap();
+        assert_eq!(
+            settings.project("me/demo").unwrap().review.reaction,
+            Reaction::Eyes
+        );
+        let off = format!("{PROJECT}review:\n  reaction: off\n");
+        let settings = load(DAEMON, &off).unwrap();
+        let review = &settings.project("me/demo").unwrap().review;
+        assert_eq!(review.reaction.github_name(), None);
+        assert!(load(DAEMON, &format!("{PROJECT}review:\n  reaction: '+1'\n")).is_err());
     }
 
     #[test]

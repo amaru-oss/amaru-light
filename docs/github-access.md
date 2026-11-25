@@ -32,7 +32,7 @@ that pull request's commits until it merges.
 | Action | Needs |
 | --- | --- |
 | Read issues and pull requests, clone | Read access (any public repository). |
-| Comment on issues, open pull requests from a fork, reply to review comments | A signed-in account; no role on a public repository. |
+| Comment on issues, open pull requests from a fork, reply to review comments, react to reviews and comments | A signed-in account; no role on a public repository. |
 | Push branches | Write access to the repository it pushes to: `repo` (direct) or the fork. |
 | Add and remove the `amaru:working` and `amaru:blocked` labels | Triage or write access to `repo`. |
 | Be assigned issues (`intake.assignee`) | Access to `repo`: GitHub only lets you assign collaborators. |
@@ -47,6 +47,10 @@ daemon works, with these differences:
 
 - It cannot label issues. It logs `cannot add the amaru:working label`,
   records a `LABEL_SKIPPED` event and goes on.
+- If GitHub refuses a reaction (for example a fine-grained token without
+  access to the upstream repository), it logs `cannot react to <id>`,
+  records a `REACTION_SKIPPED` event and goes on. It does not retry that
+  reaction.
 - When a ticket blocks, its comment on the issue says to run
   `amaru unblock <ticket>`; removing a label does nothing, because there is
   none.

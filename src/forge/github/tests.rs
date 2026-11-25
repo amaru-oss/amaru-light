@@ -10,7 +10,7 @@ case "$*" in
   *"dependencies/blocked_by"*) echo '[]' ;;
   *"issues/5") echo '{"number":5,"title":"Five","state":"open"}' ;;
   *"pulls -f head="*) echo '[{"number":30,"html_url":"u","state":"open","head":{"sha":"abc"}}]' ;;
-  *"pulls/30/reviews"*) echo '[{"id":1,"state":"APPROVED","body":"","user":{"login":"me"}},{"id":2,"state":"CHANGES_REQUESTED","body":"redo","user":{"login":"me"}}]' ;;
+  *"pulls/30/reviews"*) echo '[{"id":1,"state":"APPROVED","body":"","user":{"login":"me"}},{"id":2,"node_id":"PRR_2","state":"CHANGES_REQUESTED","body":"redo","user":{"login":"me"}}]' ;;
   *"pulls/30/comments"*) echo '[{"id":3,"body":"rename","path":"a.rs","line":4,"user":{"login":"me"}}]' ;;
   *"issues/30/comments"*) echo '[]' ;;
   *"check-runs"*) echo '{"check_runs":[{"id":7,"name":"ci","conclusion":"failure","output":{"title":"tests","summary":"2 failed"}},{"id":8,"name":"lint","conclusion":"success"}]}' ;;
@@ -61,6 +61,7 @@ async fn collects_feedback_and_failed_checks() {
     let found = gh.feedback("org/app", &pr).await.unwrap();
     let ids: Vec<&str> = found.iter().map(|f| f.id.as_str()).collect();
     assert_eq!(ids, ["review-2", "line-3", "check-7-abc"]);
+    assert_eq!(found[0].node_id.as_deref(), Some("PRR_2"));
     assert_eq!(found[1].path.as_deref(), Some("a.rs"));
     assert!(found[2].body.contains("2 failed"));
 }
@@ -76,12 +77,19 @@ async fn replies_in_line_threads_and_encodes_labels() {
         body: String::new(),
         path: None,
         line: None,
+        node_id: Some("PRRC_3".into()),
     };
     gh.reply("org/app", 30, &line, "done").await.unwrap();
+    gh.react(&line, Reaction::Eyes).await.unwrap();
+    gh.react(&line, Reaction::Off).await.unwrap();
     gh.remove_label("org/app", 1, "amaru:working")
         .await
         .unwrap();
     let log = calls(dir.path());
     assert!(log.contains("pulls/30/comments/3/replies -f body=done"));
     assert!(log.contains("labels/amaru%3Aworking"));
+    assert!(log.contains("graphql -f query=mutation"));
+    assert!(log.contains("content: EYES"));
+    assert!(log.contains("-f id=PRRC_3"));
+    assert_eq!(log.matches("graphql").count(), 1);
 }

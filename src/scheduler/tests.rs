@@ -102,7 +102,7 @@ async fn a_milestone_drain_stops_when_nothing_is_left() {
 #[tokio::test]
 async fn a_blocked_ticket_without_its_label_waits_for_unblock() {
     let fake = Fake::new("false").await;
-    fake.forge.state().deny_labels = true;
+    fake.forge.state().denied.labels = true;
     fake.forge.update_issue(1, |_| {});
     let scheduler = scheduler(&fake, Intake::Autonomous);
     settle(&scheduler).await;
