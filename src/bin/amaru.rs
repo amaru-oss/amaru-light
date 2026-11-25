@@ -1,9 +1,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 //! `amaru`: the v2 daemon and its command line.
 
-use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
-use mini_amaru::{
+use amaru_light::{
     actions::{self, Claimed},
     app::services,
     forge::jira::{Curl, Jira},
@@ -11,6 +9,8 @@ use mini_amaru::{
     process,
     scheduler::{Intake, Scheduler},
 };
+use anyhow::{Context, Result, bail};
+use clap::{Parser, Subcommand};
 use std::{path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
 use tokio::sync::watch;
 
@@ -94,7 +94,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
 async fn run(svc: Arc<Services>, intake: Intake, web: bool) -> Result<()> {
     let (stop, stop_rx) = watch::channel(false);
     let server = if web && svc.settings.daemon.web.enabled {
-        Some(mini_amaru::web::start(Arc::clone(&svc), stop_rx.clone()).await?)
+        Some(amaru_light::web::start(Arc::clone(&svc), stop_rx.clone()).await?)
     } else {
         None
     };
@@ -175,7 +175,7 @@ async fn probe(label: &str, program: &str, args: &[&str]) -> bool {
 }
 
 /// Reach every Jira server the projects use, with their tokens.
-async fn check_jira(settings: &mini_amaru::settings::Settings) -> bool {
+async fn check_jira(settings: &amaru_light::settings::Settings) -> bool {
     let mut ok = true;
     let jira: Vec<_> = settings
         .projects
@@ -200,7 +200,7 @@ async fn check_jira(settings: &mini_amaru::settings::Settings) -> bool {
 }
 
 async fn doctor(config: &std::path::Path) -> Result<()> {
-    let settings = mini_amaru::settings::Settings::load(config)?;
+    let settings = amaru_light::settings::Settings::load(config)?;
     println!("ok    settings: {} project(s)", settings.projects.len());
     let mut ok = probe("git", "git", &["--version"]).await;
     ok &= probe("gh", &settings.daemon.gh, &["auth", "status"]).await;
