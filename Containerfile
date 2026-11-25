@@ -1,5 +1,5 @@
 # The ripwire release to build; a tag of github.com/redhat-et/ripwire.
-ARG RIPWIRE_VERSION=v0.6.10
+ARG RIPWIRE_VERSION=v0.7.0
 
 FROM docker.io/library/rust:1.98-bookworm AS backend
 WORKDIR /build
