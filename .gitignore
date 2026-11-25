@@ -1,9 +1,6 @@
 /target/
 /dist/
 .env
-data/*.db
-data/*.db-*
-data/artifacts/*
-!data/artifacts/.gitkeep
-data/worktrees/*
+# Daemon state next to a local settings file.
+data/
 .DS_Store

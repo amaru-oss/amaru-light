@@ -1,6 +1,6 @@
-# Machine-wide settings for the v2 daemon.
+# Machine-wide settings for the amaru daemon.
 # The bot account's token is read by `gh` from the GH_TOKEN environment variable.
-state_dir: ../data
+state_dir: data          # relative to this file
 poll_interval: 60s
 max_parallel: 2          # tickets in progress at once (1 or 2)
 gh: gh

@@ -1,348 +1,210 @@
-# Mini-Amaru
+# Amaru Light
 
-Experimental local runtime in **Rust** for coordinating engineering agents through their CLIs. SQLite + YAML + Git/GitHub CLI. The React/TypeScript frontend lives in `web/`. No Python installation is required.
+A personal daemon that turns GitHub issues into pull requests. It claims
+issues, works each one in a single agent CLI session (Claude Code or Codex),
+runs the project's checks, opens a pull request and keeps fixing it from
+review feedback and CI until you merge it. It never merges.
 
-## Requirements and installation
+It is built for one person on a laptop, a home server or a cloud VM, not for a
+team. The design and the reasons behind it are in [docs/design.md](docs/design.md).
 
-- Rust and Cargo (stable toolchain with support for the 2024 edition)
-- Git; GitHub CLI (`gh`) authenticated for milestones, issues and PRs
-- At least one agent CLI installed and authenticated
-- Node.js/npm, only for the frontend
+## How it works
 
-```bash
-make install
-cp packaging/example.yaml projects/my-project.yaml
+```
+claim → QUEUED → PREPARING → IMPLEMENTING → CHECKING → SELF_REVIEW → PUBLISHING
+      → AWAITING_REVIEW ⇄ ADDRESSING_REVIEW → DONE (after you merge)
+any step → BLOCKED (with the reason on the issue) → resumes when unblocked
 ```
 
-The binary is placed at `target/release/mini-amaru`. Use it directly or run the `make`/`cargo run` shortcuts below.
+- **One agent session per ticket.** Implementation, check fixes, self-review
+  and review rounds all resume the same CLI session, so the agent keeps its
+  context and the prompt cache. If a session is lost, the daemon starts a new
+  one with a compact context pack.
+- **A result file, not prose.** At the end of every step the agent writes
+  `.amaru/result.json` (done, blocked or needs clarification, with a summary).
+  The daemon reads it instead of parsing the agent's output.
+- **Deterministic checks.** The daemon runs the project's checks itself and
+  sends the failures back to the same session, up to `max_fix_rounds`.
+- **At most two tickets in progress.** A ticket waiting for review frees its
+  slot. An issue that depends on another one (`Depends on #12` in its body)
+  starts once #12 has a pull request, on a branch stacked on it.
+- **Restartable.** Tickets live in SQLite. After a restart or a crash every
+  unfinished ticket continues from its last state.
+
+## Ways to claim work
+
+| Mode | Command | What is claimed |
+| --- | --- | --- |
+| Autonomous | `amaru serve` | Issues with one of the project's `intake.labels` and/or assigned to `intake.assignee` |
+| Milestone | `amaru drain owner/name --milestone "v1.2"` | Every open issue of the milestone, then the command exits |
+| Manual | `amaru claim owner/name#42 [--now]` | One issue you pick |
+
+Issues with a skip label (`amaru:hold`, `needs-human` by default) are left
+alone. Priority labels, then the milestone due date, then age decide the
+order.
+
+While the daemon works on an issue it adds the `amaru:working` label. When it
+needs you, it comments on the issue with the reason and adds `amaru:blocked`.
+Remove the label, or run `amaru unblock <ticket>`, to let it continue where it
+stopped. Closing the issue cancels the ticket.
+
+## Reviews
+
+After the pull request is open, the daemon polls it. Review comments,
+reviews that request changes and failing CI start a new round in the same
+session, up to `review.max_rounds`. Only feedback from the logins in
+`review.reviewers` reaches the agent, and the bot's own comments are ignored.
+
+Self-review is optional per project: `off` (only act on reviews received),
+`same_agent` (the working session reviews its own diff) or `other_agent` (a
+fresh session of `review.reviewer_agent` reviews it).
+
+## Direct pushes or a fork
+
+Without `fork`, branches are pushed to the repository itself. With
+`fork: my-bot/my-project`, they are pushed to the bot's fork and pull
+requests are opened upstream from `my-bot:branch`. A stacked pull request
+from a fork targets the base branch, because GitHub cannot open a pull
+request against a branch of the fork; its body names the pull request it
+builds on.
+
+## Requirements
+
+- Git and the GitHub CLI (`gh`).
+- A GitHub token for the bot account in `GH_TOKEN`. A separate bot account
+  keeps its comments and pull requests apart from yours. Run
+  `gh auth setup-git` once so Git pushes with that token.
+- At least one agent CLI, signed in: `claude` or `codex`. The agent runs
+  unattended in its worktree, so it must be allowed to run the project's
+  build and tests without asking.
+- Rust (see `rust-toolchain.toml`) to build from source.
+
+## Quick start
+
+```sh
+make install                     # target/release/amaru
+mkdir -p ~/amaru && cp examples/*.yaml ~/amaru/
+mv ~/amaru/daemon.yaml ~/amaru/amaru.yaml
+# Edit ~/amaru/project.yaml: repo, intake, checks, review.
+export GH_TOKEN=...              # the bot account's token
+target/release/amaru -c ~/amaru/amaru.yaml doctor
+target/release/amaru -c ~/amaru/amaru.yaml serve
+```
+
+Other commands:
+
+```sh
+amaru -c amaru.yaml status              # recent tickets
+amaru -c amaru.yaml status --ticket 7   # one ticket's events
+amaru -c amaru.yaml unblock 7
+amaru -c amaru.yaml cancel 7
+```
+
+## Configuration
+
+Two kinds of YAML files, both checked strictly (an unknown key is an error):
+
+- [`examples/daemon.yaml`](examples/daemon.yaml): machine-wide settings. The
+  state directory, poll interval, parallel tickets (1 or 2), the agent CLIs
+  and the list of project files.
+- [`examples/project.yaml`](examples/project.yaml): one repository. Base
+  branch, optional fork, intake selectors, the agent to use, step timeout,
+  checks, fix rounds, review and self-review, and how long the worktree of a
+  blocked ticket is kept (`workspace.keep_blocked`: `0`, `7d`, `forever`).
+
+The state directory holds `amaru.db` (tickets and their event log) and
+`repos/<owner>/<name>/`, a mirror clone with one worktree per ticket.
+
+The prompts are in [`prompts/`](prompts) and compiled into the binary. To
+change one, put a file with the same name in a `prompts/` directory next to
+the daemon settings file.
 
 ## Package for another machine
 
-```bash
+```sh
 make package
-# Optional: another target, with the toolchain/linker already installed:
+# Optional: another target, with the toolchain and linker installed:
 make package TARGET=x86_64-unknown-linux-musl
+scripts/test-package.sh dist/amaru-<version>-<target>.tar.gz
 ```
 
-This produces `dist/mini-amaru-<version>-<target>.tar.gz` and a SHA-256 checksum. The package includes
-the release binary, the compiled frontend, YAML configuration, projects, skills and
-the installer. It does not include databases, logs, credentials, checkouts or caches. The build
-needs Rust/Cargo and Node.js/npm; the target machine does not need them.
-Each package targets one operating system/architecture; cross-compilation requires
-the target's tools. A macOS package does not run on Linux. Linux GNU builds also
-require a glibc compatible with the build machine.
+The archive holds the binary, the example settings, an installer and
+[INSTALL.md](packaging/INSTALL.md). It has no database, credentials or
+checkouts.
 
-Validate a native package with `scripts/test-package.sh dist/<file>.tar.gz`.
-
-Copy the file to the other machine, extract it and run:
-
-```bash
-tar -xzf mini-amaru-<version>-<target>.tar.gz
-cd mini-amaru-<version>-<target>
-./install.sh "$HOME/bot/mini-amaru"
-cd "$HOME/bot/mini-amaru"
-# Configure projects/example.yaml and config/providers.yaml.
-./mini-amaru doctor
-./mini-amaru serve
-```
-
-Open **http://127.0.0.1:8765**: the package launcher serves the UI and the API on
-the same port. Git, `gh` and the chosen agent CLI must be installed and
-authenticated on the target. The installer uses a user-writable directory and
-refuses to overwrite existing installations. Full instructions, SSH access
-and SQLite permission troubleshooting are in `INSTALL.md` inside the package.
-
-Edit `projects/my-project.yaml`: `project.root` points to the project checkout (relative to the YAML file or absolute); `project.repository` is `owner/repo`; `models.allowed` restricts models; `execution.check_command` defines validation. The files in `config/` select providers, models, routes, timeouts and storage. Provider commands receive the prompt on stdin and substitute `{model}`.
-
-The database, artifact and worktree directories are created automatically.
-When a job or loop starts, if `project.root` is missing or empty and
-`project.repository` is set, the runtime clones that repository with `gh repo clone`.
-Authenticate `gh` as the service user. Existing checkouts with files
-are preserved. Without `project.repository`, a missing directory is created as
-an empty workspace. `doctor` and `loop --dry-run` do not clone repositories.
-
-```bash
-make doctor CONFIG=projects/my-project.yaml
-make run CONFIG=projects/my-project.yaml PROMPT='Implement feature X with tests.'
-make jobs CONFIG=projects/my-project.yaml
-make status CONFIG=projects/my-project.yaml JOB=1
-```
-
-CLI equivalent:
-
-```bash
-cargo run -- -c projects/my-project.yaml run -p 'Implement feature X with tests.'
-cargo run -- -c projects/my-project.yaml resume --job 1
-cargo run -- --help
-```
-
-`-c/--config` can appear before or after the subcommand. `status` and `jobs` use the database of the selected configuration.
-
-## Two execution modes
-
-**Job (`run`)**: the planning model generates JSON tasks. Each task runs in a new provider call, sequentially, with instructions and recent summaries. The runtime records attempts, events, output and a report. Agents work directly in `project.root` and are instructed not to commit/push/merge. `resume` creates a new job with the original request and continuation instructions.
-
-**Delivery loop (`loop`)**: a persistent state machine watches GitHub, picks eligible work and coordinates its delivery:
-
-```text
-SYNC -> OBSERVE -> DECIDE -> WORK -> SYNC ...
-                         |
-                         PREPARE -> EXECUTE -> VERIFY -> PUBLISH -> REVIEW -> MERGE
-```
-
-The software validates the brain's decisions and uses a deterministic fallback if the model returns an invalid action or is unavailable. Each item becomes a child job in a separate Git worktree. Agents implement and commit; the runtime creates branches, runs verification, publishes PRs, requests review and applies the merge policy.
-
-The loop respects blockers and blockers inherited from the parent, sub-issues, open PRs and human-gate labels (`owner-task`, `awaiting-owner-approval`, `milestone-exit`). Sub-issues use the parent's integration branch. Partial PRs reference the issue; closing it requires declared completion and the integration rules. A PR from the parent to the main branch remains a human decision.
-
-```bash
-make loop-dry GOAL='Continue the Milestone 5 tasks until it is completed'
-make loop GOAL='Continue the Milestone 5 tasks until it is completed'
-cargo run -- loop -c projects/amaru.yaml --milestone 5 -p 'Continue the milestone'
-cargo run -- loop -c projects/amaru.yaml --resume 12
-```
-
-`--dry-run` queries the state without agents, worktrees, push or PR. `Milestone N` first tries the title `M<N> ...`, before GitHub's internal number. Check the selection in the dry run.
-
-Main policies:
-
-- `publish.mode`: `auto` or `manual` (pauses before publishing).
-- `merge.mode`: `manual`, `integration_only` (default; only integration is automatic) or `always`.
-- `review.enabled`, `review.max_rounds`: independent review and fix-round limit.
-- `loop.max_iterations`, `loop.max_tasks_per_item`, `loop.max_passes_per_item`: work limits.
-- `loop.on_blocked`: `stop` or `brain`; `loop.on_waiting`: `stop` or `continue`.
-
-Review and checks gate automatic merges. Manual approval also requires that checks are not pending or failing. The loop can be resumed under the same ID from its saved state. Cancellation is cooperative and checked between steps; it does not immediately interrupt an agent call in progress.
-
-### Contributing through a fork
-
-Create the fork on GitHub and configure the project YAML:
-
-```yaml
-project:
-  name: my-project
-  repository: organization/my-project
-  root: ../repos/my-project
-git:
-  base_branch: main
-  fork_repository: my-user/my-project
-```
-
-Keep `origin` pointing to the upstream repository. If the checkout does not
-exist yet, the runtime clones `project.repository` on first use. The `gh`
-account must be able to access upstream, push branches to the fork and open
-PRs on upstream. Run `gh auth setup-git` on the machine or in the container
-that runs the loop to authenticate HTTPS pushes.
-
-In the delivery loop, branches start from upstream, pushes go to the fork
-and the PR is opened on upstream. `publish.mode: manual` still lets you review the
-work before publishing. A maintainer merges on GitHub and the loop
-reconciles the result on the next sync. If a sub-issue requires
-an integration branch that does not exist yet, ask a maintainer to
-create it on upstream. Without `git.fork_repository`, the flow uses `origin`
-for publishing as well.
-
-## Local API and frontend
-
-```bash
-make serve CONFIG=projects/my-project.yaml
-# Or:
-cargo run -- -c projects/my-project.yaml serve --port 9000 --cors-origin http://localhost:5173
-```
-
-The server listens on `127.0.0.1:8765` by default, with a single sequential worker. Browser origins are validated on the server; the default origins are `http://localhost:5173` and `http://127.0.0.1:5173`.
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| GET | `/api/health` | Service health |
-| GET | `/api/jobs` | Recent jobs |
-| POST | `/api/jobs` | `{ "prompt": "...", "mode": "job" or "loop", "milestone": "5" }` |
-| GET | `/api/jobs/<id>` | Job, tasks, child items and available actions |
-| GET | `/api/jobs/<id>/events?after=0` | Incremental events |
-| GET | `/api/jobs/<id>/log?offset=0` | Incremental output `{text, offset, size}` |
-| POST | `/api/jobs/<id>/resume` | Continues a loop or creates a continuation job |
-| POST | `/api/jobs/<id>/cancel` | Requests loop cancellation |
-| POST | `/api/jobs/<id>/pr` | Publishes the PR of a ready item |
-| POST | `/api/jobs/<id>/approve` | Approves and merges the PR |
-
-Creation requires `Content-Type: application/json`; the body is limited to 64 KiB and the prompt to 20,000 characters. The existing frontend consumes the same API:
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-The UI offers a dashboard, a list of runs, a goal form, details, tasks, logs/events, PR publishing, approval and resuming. `VITE_API_URL` overrides the default API URL. See `web/README.md`.
-
-To serve the compiled frontend from the binary itself: `VITE_API_URL='' npm --prefix web run build`
-and `cargo run -- -c projects/my-project.yaml serve --web-dir web/dist`.
-
-## Podman
-
-On macOS, start the VM with `podman machine start` (run `podman machine init`
-first if you do not have a VM yet). From the project root, run `make image`.
-The base image `localhost/mini-amaru:latest` uses Fedora Minimal 45 and includes the
-Linux binary, the dashboard, Git, `gh` and [ripwire](https://github.com/redhat-et/ripwire).
-Build a derived image for each project, with the agent CLI and the tools
-required by the build and tests.
-
-ripwire is a code map tool that lets agents find the code for a task in few
-tokens. The `RIPWIRE_VERSION` build argument selects the release tag to build,
-for example `podman build --build-arg RIPWIRE_VERSION=v0.6.10 ...`.
-On x86-64 it needs a CPU with x86-64-v3 instructions (AVX2). At each start,
-the container entrypoint activates the ripwire skills for Claude Code
-(`~/.claude/skills`) and Codex (`~/.agents/skills`) in the runtime user's
-home, so they also reach a home directory mounted as a volume. Set
-`AMARU_RIPWIRE_SKILLS=0` to skip that step.
-
-For example, if your project uses Go and you already have a Linux-compatible
-agent CLI, save a `Containerfile.project` in your build context:
-
-```dockerfile
-FROM localhost/mini-amaru:latest
-USER root
-RUN microdnf install -y golang make && microdnf clean all
-COPY --chmod=755 my-agent /usr/local/bin/my-agent
-COPY providers.yaml /app/config/providers.yaml
-COPY models.yaml /app/config/models.yaml
-COPY routing.yaml /app/config/routing.yaml
-COPY project.yaml /app/projects/project.yaml
-USER mini-amaru
-```
-
-Use the YAML files in `config/` and `packaging/example.yaml` as a reference.
-Configure the agent command in `providers.yaml` to receive the prompt on
-stdin and write the response to stdout. The IDs in `routing.yaml` must
-exist in `models.yaml` and be allowed by the project. Set
-`project.root: ../repos/my-project` and the project's check command in
-`project.yaml`. Keep credentials out of the build context.
+## Container image
 
 ```sh
-podman build -f Containerfile.project -t localhost/mini-amaru-project:latest .
+make image          # localhost/mini-amaru:latest
+make image-check    # build it and run scripts/test-image.sh
 ```
 
-Use named volumes to persist jobs, worktrees, checkouts and the container
-account's configuration.
+The base image (Fedora Minimal) contains `amaru`, Git, the GitHub CLI and
+[ripwire](https://github.com/redhat-et/ripwire), a code map tool that helps
+agents find the code for a task in few tokens. The entrypoint activates the
+ripwire skills for Claude Code and Codex at each start
+(`AMARU_RIPWIRE_SKILLS=0` skips it). By default the image runs
+`amaru --config /config/amaru.yaml serve`; mount your settings at `/config`
+and a volume at `/data`, with `state_dir: /data`.
 
-```sh
-podman run -d --name mini-amaru \
-  -p 127.0.0.1:8765:8765 \
-  -v mini-amaru-data:/app/data:U \
-  -v mini-amaru-repos:/app/repos:U \
-  -v mini-amaru-home:/home/mini-amaru:U \
-  localhost/mini-amaru-project:latest \
-  serve -c projects/project.yaml --host 0.0.0.0 \
-  --cors-origin http://127.0.0.1:8765 --cors-origin http://localhost:8765
-```
+Derive one image per project with its agent CLI and build tools:
+[docs/building-project-containers.md](docs/building-project-containers.md).
 
-Open **http://127.0.0.1:8765** on the machine where Podman publishes the port.
-Before the first job, authenticate the agent installed in the derived image and
-`gh` inside the container. The configuration in the home directory persists in
-the `mini-amaru-home` volume.
+CI publishes the image to `ghcr.io/amaru-oss/mini-amaru` for `amd64` and
+`arm64`: `latest` and the commit SHA after a push to `main`, the version and
+the commit SHA after a release tag.
 
-```sh
-podman exec -it mini-amaru gh auth login --hostname github.com --git-protocol https --web
-podman exec mini-amaru gh auth setup-git
-podman exec mini-amaru /app/mini-amaru doctor -c projects/project.yaml
-```
+## Safety
 
-Set `git config --global user.name` and `user.email` inside the container
-if the agents need to create commits. For another project, mount the configuration
-with `-v "$PWD/projects:/app/projects:ro,Z"` and select the YAML with `-c`. Use a
-relative path such as `../repos/my-project` in the YAML. The first job can clone
-the repository into the volume using `gh` authentication. On SELinux hosts, use
-`:Z` to label the bind mounts. If you change the published port, adjust the origins
-to the URL the browser uses.
-
-See [docs/building-project-containers.md](docs/building-project-containers.md) for a full guide.
-
-### Pull the published image
-
-CI publishes the base image to the GitHub Container Registry as
-`ghcr.io/amaru-oss/mini-amaru`. Each tag is a multi-arch manifest for Linux
-x86-64 (`amd64`) and AArch64 (`arm64`):
-
-- `latest` and the full commit SHA, after a successful push to `main`.
-- The version, for example `0.1.0`, and the full commit SHA, after a
-  release tag.
-
-```sh
-podman pull ghcr.io/amaru-oss/mini-amaru:latest
-```
-
-To use the published image instead of a local build, replace
-`localhost/mini-amaru:latest` with `ghcr.io/amaru-oss/mini-amaru:latest` in the
-`FROM` line of a derived image. Run `make image-check` to build the image
-locally and run the same smoke test that CI runs.
-
-## Data and configuration
-
-- `config/runtime.yaml`: SQLite, artifacts and retries.
-- `config/providers.yaml`: CLIs and the Ollama endpoint (`/api/generate`).
-- `config/models.yaml`: logical model IDs.
-- `config/routing.yaml`: model per task type and availability fallback.
-- `projects/*.yaml`: checkout, policies and limits per project.
-- `skills/`: instructions added to prompts.
-- `data/mini-amaru.db`: jobs, tasks, attempts, events, artifacts and loop state.
-- `data/artifacts/`: plans, GitHub snapshots, reports and logs.
-
-The SQLite schema and existing YAML configuration are preserved. Databases from the previous version are migrated by adding missing metadata; make a backup before the first run of the new version. Jobs that were RUNNING/QUEUED when the server starts become INTERRUPTED.
-
-## Operational limits
-
-This runtime is experimental. Worktrees separate changes, but they are not a sandbox. Providers and checks run with the user's permissions and may inherit credentials from the environment. Restrictions in prompts depend on the CLI's behavior; use an isolated environment and limited permissions for untrusted content.
-
-The API has no authentication; keep the bind local and do not expose the port. The loop can publish and integrate real changes according to the policy. Start with a dry run, `publish.mode: manual`, `merge.mode: manual` and low limits. Job mode trusts the agent process's success; a report does not prove the code is correct.
+Worktrees separate changes, but they are not a sandbox. The agent and the
+checks run with the daemon user's permissions and environment. Run the daemon
+in a container or a VM, with a bot token that can only reach the repositories
+it works on. The daemon pushes only to the branches it created and never
+merges.
 
 ## Development
 
-```bash
-make check        # cargo fmt --check, clippy -D warnings, cargo test
-make web-check    # npm ci, frontend build and oxlint
-make image-check  # build the base image and smoke-test it (podman or docker)
+```sh
+make check          # cargo fmt --check, clippy -D warnings, cargo test
+make image-check    # build the base image and smoke-test it (podman or docker)
 ```
 
+The crate follows the lint configuration of
+[Wanaku](https://github.com/wanaku-ai/wanaku) (`clippy.toml` and `[lints]` in
+`Cargo.toml`): no `unwrap`, `expect`, `panic` or `unsafe` outside tests, and
+short functions. The tests use fake agent and `gh` scripts and temporary Git
+repositories; they need no credentials.
+
 `rust-toolchain.toml` pins the Rust release. Keep it on the same release as
-the Rust stage of the `Containerfile`. Run `make check` before you push. Run
-`make web-check` when you change `web/`, and `make image-check` when you
-change the `Containerfile` or `packaging/`.
+the Rust stage of the `Containerfile`.
+
+| Module | Role |
+| --- | --- |
+| `bin/amaru.rs`, `app.rs` | Command line and wiring |
+| `scheduler` | Intake, slots, polling pull requests, retention |
+| `lifecycle` | One ticket's steps, sessions and review rounds |
+| `agent` | Claude Code and Codex drivers |
+| `contract.rs`, `prompts.rs` | The result file and the prompts |
+| `forge` | GitHub issues and pull requests through `gh` |
+| `worktree.rs`, `checks.rs`, `process.rs` | Git, checks and child processes |
+| `db.rs`, `ticket.rs`, `settings.rs` | State and configuration |
 
 ### Continuous integration
 
 `.github/workflows/ci.yml` runs on each pull request, each push to `main`
-and each release tag:
-
-- `make fmt-check`, `make clippy` and `make test`, the gates of `make check`.
-- `make web-check` for the frontend.
-- An image build from the `Containerfile` and `scripts/test-image.sh` on
-  `amd64` and `arm64`. The smoke test checks the tools in the image, the
-  runtime user, the ripwire skills, `/api/health`, `/api/jobs` and the
-  dashboard.
-
-After all checks pass, pushes to `main` and release tags publish the image
-([Pull the published image](#pull-the-published-image)). Pull requests do
-not publish. The optional repository variables `CONTAINER_REGISTRY` (default
-`ghcr.io`) and `CONTAINER_GROUP` (default the repository owner) change the
-image location.
+and each release tag: `make fmt-check`, `make clippy`, `make test`, and an
+image build with `scripts/test-image.sh` on `amd64` and `arm64`. After all
+checks pass, pushes to `main` and release tags publish the image. The
+optional repository variables `CONTAINER_REGISTRY` (default `ghcr.io`) and
+`CONTAINER_GROUP` (default the repository owner) change its location.
 
 ### Releases
 
-1. Set `version` in `Cargo.toml` to the release version, for example
-   `0.1.0`. Run `cargo check` so `Cargo.lock` agrees, and merge the change.
-2. Push a bare version tag on that commit:
+1. Set `version` in `Cargo.toml`, run `cargo check` so `Cargo.lock` agrees,
+   and merge the change.
+2. Push a bare version tag on that commit: `git tag 0.1.0 && git push origin 0.1.0`.
 
-   ```sh
-   git tag 0.1.0
-   git push origin 0.1.0
-   ```
-
-CI runs all checks on the tag. It stops when the tag is not equal to the
-version in `Cargo.toml`. Then it publishes the image tags `<version>` and
-`<commit SHA>`.
-
-The tests use Rust, fake shell agents and temporary Git repositories. They need no Python, credentials or real agents. API/CLI tests run the binary; delivery tests cover worktrees, publishing, review, approval and resuming with a fake GitHub CLI.
-
-Rust layout: `src/main.rs` (CLI), `server.rs` (HTTP), `engine.rs`/`providers.rs`/`runtime.rs` (execution), `delivery.rs` (loop and items), `github.rs`/`gitops.rs`/`sources.rs`/`policy.rs` (integration and rules), `storage.rs`/`config.rs`/`joblog.rs` (infrastructure).
+CI stops when the tag differs from the version in `Cargo.toml`.
 
 ## License
 

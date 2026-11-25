@@ -58,18 +58,6 @@ jobs:
       - name: Test
         run: make test
 
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Lint and build the frontend
-        run: make web-check
-
   version:
     # A release tag must be equal to the package version in Cargo.toml.
     if: startsWith(github.ref, 'refs/tags/')
@@ -133,7 +121,7 @@ jobs:
           docker push "$image"
 
   image-manifest:
-    needs: [format, clippy, test, web, version, image]
+    needs: [format, clippy, test, version, image]
     # `version` runs only for tags, so accept it as skipped on main.
     if: >-
       !cancelled() &&
@@ -142,7 +130,6 @@ jobs:
       needs.format.result == 'success' &&
       needs.clippy.result == 'success' &&
       needs.test.result == 'success' &&
-      needs.web.result == 'success' &&
       needs.image.result == 'success' &&
       (needs.version.result == 'success' || needs.version.result == 'skipped')
     runs-on: ubuntu-latest

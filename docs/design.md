@@ -1,4 +1,4 @@
-# Amaru Light v2: design
+# Amaru Light: design
 
 Amaru Light v2 is a long-running personal daemon. It takes GitHub tickets,
 works each one in a single agent CLI session, opens a pull request and keeps
@@ -150,3 +150,8 @@ push and a reply per addressed thread. The daemon never resolves threads.
   `std::thread::sleep`. The daemon is therefore built on tokio.
 - Configuration lives in `src/settings.rs`; `examples/` holds a daemon file and
   a project file that the tests load.
+- The v1 runtime (job engine, delivery loop, HTTP API and web dashboard) is
+  removed. The daemon has no HTTP interface; `amaru status` and the labels
+  and comments on each issue show what it is doing.
+- The crate keeps the name `mini-amaru` and the image `ghcr.io/amaru-oss/mini-amaru`,
+  so published image names and volumes keep working. The binary is `amaru`.
