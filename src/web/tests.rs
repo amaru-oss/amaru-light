@@ -134,3 +134,14 @@ async fn lists_agents_and_their_sign_in() {
     let (status, _) = call(&app, post("/api/agents/claude/login/cancel", "")).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn refuses_a_key_sign_in_the_agent_lacks() {
+    let fake = Fake::new("").await;
+    let app = router(Arc::clone(&fake.svc), None);
+    let (_, list) = call(&app, get("/api/agents")).await;
+    assert!(list[0]["key_login_command"].is_null());
+    let (status, body) = call(&app, post("/api/agents/claude/login", r#"{"key":"sk-1"}"#)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!body.to_string().contains("sk-1"));
+}

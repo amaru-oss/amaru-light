@@ -54,6 +54,7 @@ async fn agents(State(web): State<Web>) -> Json<Vec<Value>> {
                 "driver": a.driver,
                 "command": a.command,
                 "login_command": command_line(a, &a.login_args()),
+                "key_login_command": command_line(a, &a.key_login_args()),
                 "status_command": command_line(a, &a.status_args()),
                 "used_by": used_by,
                 "login": web.logins.get(name),
@@ -80,11 +81,26 @@ async fn progress(State(web): State<Web>, Path(name): Path<String>) -> ApiResult
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("no sign-in for {name}")))
 }
 
-async fn start(State(web): State<Web>, Path(name): Path<String>) -> ApiResult<LoginView> {
+#[derive(Debug, Default, Deserialize)]
+struct StartBody {
+    /// An API key, for the agent's key sign-in. Never logged or returned.
+    #[serde(default)]
+    key: Option<String>,
+}
+
+async fn start(
+    State(web): State<Web>,
+    Path(name): Path<String>,
+    body: Option<Json<StartBody>>,
+) -> ApiResult<LoginView> {
     let settings = agent(&web, &name)?;
+    let key = body
+        .and_then(|Json(b)| b.key)
+        .filter(|k| !k.trim().is_empty());
     let view = web
         .logins
-        .start(&name, settings)
+        .start(&name, settings, key.as_deref())
+        .await
         .map_err(|e| ApiError::rejected(&e))?;
     Ok(Json(view))
 }

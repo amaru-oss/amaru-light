@@ -86,11 +86,20 @@ For each agent, the page shows:
   - Claude Code (`claude auth login`) prints a link. After you approve, the
     page shows a code: paste it into the field under the output and press
     **Send**.
+- **Use an API key** signs in with a key instead, where the CLI supports
+  it. It runs `codex login --with-api-key` for Codex, writes the key to
+  its input and closes it, as `echo "$KEY" | codex login --with-api-key`
+  would. The key field is masked. Amaru does not store, log or show the
+  key; the CLI keeps its login as usual. Claude Code has no such command:
+  give it `ANTHROPIC_API_KEY` through the agent's `env` or the container's
+  environment instead.
 - **Stop** ends a sign-in that is no longer needed. A sign-in still running
   after 15 minutes is stopped.
 
-Other CLIs, or other ways to sign in, are a matter of settings: `login` and
-`login_status` hold the arguments given to the agent's `command`.
+Other CLIs, or other ways to sign in, are a matter of settings: `login`,
+`login_with_key` and `login_status` hold the arguments given to the
+agent's `command`; `login_with_key` fits any CLI that reads a key on
+stdin until the end of input. For example:
 
 ```yaml
 agents:
@@ -132,7 +141,7 @@ something are `POST` requests and must carry an `X-Amaru-Action` header
 | `POST /api/tickets/{id}/cancel` | Cancel a ticket. |
 | `GET /api/agents` | The agents and their latest sign-in. |
 | `GET /api/agents/{name}/status` | Run the agent's status command. |
-| `POST /api/agents/{name}/login` | Start a sign-in. |
+| `POST /api/agents/{name}/login` | Start a sign-in. With `{"key": "..."}`, the API-key sign-in. |
 | `GET /api/agents/{name}/login` | The sign-in's output and outcome. |
 | `POST /api/agents/{name}/login/input` `{"text": "..."}` | Send a line to the sign-in. |
 | `POST /api/agents/{name}/login/cancel` | Stop the sign-in. |

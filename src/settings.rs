@@ -100,6 +100,11 @@ pub struct AgentSettings {
     /// has a default; an empty list turns signing in from the page off.
     #[serde(default)]
     pub login: Option<Vec<String>>,
+    /// Arguments that sign the CLI in with an API key read from stdin, for
+    /// example `[login, --with-api-key]` for Codex. The page sends the key,
+    /// then closes stdin. An empty list turns this off.
+    #[serde(default)]
+    pub login_with_key: Option<Vec<String>>,
     /// Arguments that tell whether the CLI is signed in: exit code 0 means
     /// it is. Each driver has a default.
     #[serde(default)]
@@ -113,6 +118,17 @@ impl AgentSettings {
             DriverKind::Claude => strings(&["auth", "login"]),
             DriverKind::Codex => strings(&["login", "--device-auth"]),
         })
+    }
+
+    /// The arguments that sign the CLI in with an API key on stdin. Claude
+    /// Code reads its key from `ANTHROPIC_API_KEY` instead, so it has none.
+    pub fn key_login_args(&self) -> Vec<String> {
+        self.login_with_key
+            .clone()
+            .unwrap_or_else(|| match self.driver {
+                DriverKind::Claude => Vec::new(),
+                DriverKind::Codex => strings(&["login", "--with-api-key"]),
+            })
     }
 
     /// The arguments that report whether the CLI is signed in.

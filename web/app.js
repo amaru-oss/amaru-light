@@ -474,13 +474,35 @@ function agentCard(a) {
   const session = h("div", { class: "login-session" });
   const signIn = h("button", { type: "button", onclick: () => start() }, "Sign in");
   const check = h("button", { type: "button", class: "ghost", onclick: () => checkStatus() }, "Check again");
+  const keyField = h("input", { type: "password", name: "api-key", placeholder: "API key", autocomplete: "off", spellcheck: "false", "aria-label": `API key for ${a.name}` });
+  const keyForm = h("form", {
+    class: "login-input key-form", hidden: true,
+    onsubmit: (e) => {
+      e.preventDefault();
+      const key = keyField.value.trim();
+      keyField.value = "";
+      if (!key) return;
+      keyForm.hidden = true;
+      call("", { key });
+    },
+  }, h("p", { class: "sub key-note" }, "Runs ", h("code", {}, a.key_login_command || ""),
+    " with the key on its input. Amaru does not store the key or show it again; the CLI keeps its own login."),
+  keyField, h("button", { type: "submit" }, "Sign in with key"),
+  h("button", { type: "button", class: "ghost", onclick: () => { keyField.value = ""; keyForm.hidden = true; } }, "Close"));
+  const useKey = h("button", {
+    type: "button", class: "ghost",
+    onclick: () => { keyForm.hidden = !keyForm.hidden; if (!keyForm.hidden) keyField.focus(); },
+  }, "Use an API key");
   const el = h("section", { class: "card agent" },
     h("div", { class: "agent-head" },
       h("div", {},
         h("h2", {}, a.name, " ", chip),
         h("p", { class: "sub" }, `${a.driver} driver · `, h("code", {}, a.command),
           a.used_by.length ? ` · used by ${a.used_by.join(", ")}` : " · not used by a project")),
-      h("div", { class: "actions" }, check, a.login_command ? signIn : null)),
+      h("div", { class: "actions" }, check, a.key_login_command ? useKey : null, a.login_command ? signIn : null)),
+    a.key_login_command
+      ? keyForm
+      : null,
     h("details", {}, h("summary", {}, "Status output"), detail),
     session);
   let login = a.login;
@@ -536,7 +558,7 @@ function agentCard(a) {
     const parts = [
       h("div", { class: "login-head" },
         h("strong", {}, login.running ? "Signing in" : `Sign-in ${login.exit}`),
-        h("span", { class: "sub" }, ` · started ${relative(login.started_at)} · `, h("code", {}, a.login_command))),
+        h("span", { class: "sub" }, ` · started ${relative(login.started_at)}`)),
       output,
     ];
     if (login.running) {

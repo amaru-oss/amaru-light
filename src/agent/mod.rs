@@ -143,6 +143,7 @@ mod tests {
             model: None,
             env: BTreeMap::new(),
             login: None,
+            login_with_key: None,
             login_status: None,
         })
     }

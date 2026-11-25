@@ -63,6 +63,7 @@ projects:
 | `model` | none | Passed as `--model`. Leave it out to use the CLI's default. |
 | `env` | `{}` | Extra environment variables for the agent process. |
 | `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. `[]` turns the Sign in button off. |
+| `login_with_key` | by driver | Arguments to `command` that sign the CLI in with an API key read from stdin, for the web page's **Use an API key**. The page writes the key and closes stdin. Codex: `[login, --with-api-key]`. Claude Code: none, since it reads `ANTHROPIC_API_KEY` (set it in `env` or the container). `[]` turns it off. |
 | `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. |
 
 The daemon adds the arguments it needs itself; do not repeat them in
