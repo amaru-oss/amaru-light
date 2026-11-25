@@ -10,6 +10,7 @@ team. The design and the reasons behind it are in [docs/design.md](docs/design.m
 
 | Guide | For |
 | --- | --- |
+| [Web interface](docs/web-ui.md) | Following tickets, claiming issues and signing agent CLIs in from the browser. |
 | [Configuration reference](docs/configuration.md) | Every key of the daemon and project files, with defaults. |
 | [GitHub access](docs/github-access.md) | The bot account, its token, fork or direct pushes, and what works without write access. |
 | [Build a project container](docs/building-project-containers.md) | A derived image with your agent CLI and toolchain. |

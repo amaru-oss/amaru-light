@@ -88,6 +88,9 @@ describes every key.
 - Set `state_dir` to a volume. The base image declares `/data` for it. To
   keep everything, state and agent logins, in one home volume, use
   `state_dir: /home/mini-amaru/amaru` instead.
+- Set `web.listen: 0.0.0.0:8765` so that the [web interface](web-ui.md) is
+  reachable through the published port. Inside a container, the default
+  `127.0.0.1` answers only the container itself.
 
 The image runs `amaru --config /config/amaru.yaml serve` by default. Put the
 two files in `/config` one of two ways:
@@ -112,6 +115,7 @@ podman build -f Containerfile.project -t localhost/amaru-light-my-project:dev .
 
 podman run -d --name amaru-light-my-project \
   -e GH_TOKEN \
+  -p 127.0.0.1:8765:8765 \
   -v "$PWD/amaru-config:/config:ro,Z" \
   -v amaru-light-my-project-data:/data:U \
   -v amaru-light-my-project-home:/home/mini-amaru:U \
@@ -124,8 +128,10 @@ podman logs -f amaru-light-my-project
 The volumes hold the daemon state (database, clones and worktrees) and the
 runtime user's home directory. Use project-specific volume names, and use
 named volumes rather than host directories for them. Leave out the `/config`
-mount if the image copies the settings. The container publishes no port:
-the daemon has no web interface.
+mount if the image copies the settings. `-p 127.0.0.1:8765:8765` publishes
+the web interface on the host's loopback only, at <http://127.0.0.1:8765>.
+To publish it on other interfaces, set `-e AMARU_WEB_TOKEN` as well; see
+[Web interface](web-ui.md#access-and-the-token).
 
 `-e GH_TOKEN` without a value copies the variable from your shell, so the
 token does not show in the command line or the shell history. The volumes do
@@ -134,8 +140,9 @@ not store it; give it again when you recreate the container.
 ### Sign in to the agent from inside the container
 
 Use the named volume mounted at `/home/mini-amaru` as the container's home.
-Once the container is running, the user signs in with the installed CLI as
-`mini-amaru`. Reuse the same volume when recreating the container so file-based
+Once the container is running, sign in with the installed CLI as
+`mini-amaru`: on the [Agents page](web-ui.md#signing-agents-in) of the web
+interface, or with the commands below. Reuse the same volume when recreating the container so file-based
 login state persists. If the image sets `CODEX_HOME` or `CLAUDE_CONFIG_DIR`,
 keep that directory on the volume and use the same setting for both login
 and the daemon.

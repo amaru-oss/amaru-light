@@ -8,6 +8,7 @@ license = "Apache-2.0"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1.92"
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "tower-log"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 nix = { version = "0.32.0", features = ["signal", "process"] }
@@ -19,6 +20,7 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process"
 
 [dev-dependencies]
 tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
 
 # Lint levels copied from the workspace lints of wanaku-ai/wanaku (156f7697).
 # `from_iter_instead_of_collect` is left out: Rust 1.98 removed it.

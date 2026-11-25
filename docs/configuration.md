@@ -28,6 +28,8 @@ poll_interval: 60s
 max_parallel: 2
 gh: gh
 bot_login: my-bot
+web:
+  listen: 127.0.0.1:8765
 
 agents:
   codex:
@@ -46,6 +48,8 @@ projects:
 | `max_parallel` | `2` | Tickets that hold a worker slot at once: `1` or `2`. A ticket waiting for review does not hold a slot. |
 | `gh` | `gh` | The GitHub CLI executable. It reads the bot's token from `GH_TOKEN`. |
 | `bot_login` | none | The bot's GitHub login. Its own comments and reviews are never treated as feedback. |
+| `web.enabled` | `true` | Serve the [web interface](web-ui.md) next to `amaru serve`. |
+| `web.listen` | `127.0.0.1:8765` | The address and port of the web interface. Use `0.0.0.0:8765` in a container, and set `AMARU_WEB_TOKEN` when anyone else can reach the port. |
 | `agents` | required | The agent CLIs, by a name of your choice. Projects refer to that name. |
 | `projects` | required | The project files. |
 
@@ -58,6 +62,8 @@ projects:
 | `args` | `[]` | Extra arguments, added to every call. Use them for the permission mode. |
 | `model` | none | Passed as `--model`. Leave it out to use the CLI's default. |
 | `env` | `{}` | Extra environment variables for the agent process. |
+| `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. `[]` turns the Sign in button off. |
+| `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. |
 
 The daemon adds the arguments it needs itself; do not repeat them in
 `args`:
@@ -83,9 +89,10 @@ agents:
     args: [--dangerously-bypass-approvals-and-sandbox]
 ```
 
-Sign in to each CLI once as the user that runs the daemon (`claude` then
-`/login`, or `codex login --device-auth`). The login lives in that user's
-home directory.
+Sign in to each CLI once as the user that runs the daemon: on the
+[Agents page](web-ui.md#signing-agents-in) of the web interface, or in a
+shell with `claude auth login` or `codex login --device-auth`. The login
+lives in that user's home directory.
 
 ## The project file
 

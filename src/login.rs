@@ -1,0 +1,303 @@
+//! Signing agent CLIs in from the web page.
+//!
+//! Amaru does not ship the agent CLIs, nor their accounts. It runs the
+//! CLI's own sign-in command, shows its output (the link and code to open
+//! on another device) and passes a line of input back when the CLI asks
+//! for one. The CLI stores its credentials where it always does.
+
+use crate::settings::AgentSettings;
+use anyhow::{Context, Result, bail};
+use serde::Serialize;
+use std::{
+    collections::HashMap,
+    process::{ExitStatus, Stdio},
+    sync::{Arc, Mutex, PoisonError},
+    time::Duration,
+};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
+    process::{Child, ChildStdin, Command},
+    sync::Notify,
+};
+
+/// Output kept for each sign-in, from the end.
+const MAX_OUTPUT: usize = 32 * 1024;
+/// A sign-in still running after this long is stopped.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// How long the status command may take.
+const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// What the page shows of a sign-in.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct LoginView {
+    pub running: bool,
+    pub output: String,
+    /// How the command ended, once it has.
+    pub exit: Option<String>,
+    pub started_at: String,
+}
+
+/// Whether an agent CLI is signed in.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct LoginStatus {
+    /// `None` when the status command could not run.
+    pub signed_in: Option<bool>,
+    pub detail: String,
+}
+
+#[derive(Debug)]
+struct Progress {
+    output: Vec<u8>,
+    exit: Option<String>,
+    started_at: String,
+}
+
+#[derive(Debug)]
+struct Login {
+    progress: Mutex<Progress>,
+    stdin: tokio::sync::Mutex<Option<ChildStdin>>,
+    stop: Notify,
+}
+
+impl Login {
+    fn progress(&self) -> std::sync::MutexGuard<'_, Progress> {
+        self.progress.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn append(&self, bytes: &[u8]) {
+        let mut p = self.progress();
+        p.output.extend_from_slice(bytes);
+        if p.output.len() > MAX_OUTPUT {
+            let cut = p.output.len() - MAX_OUTPUT;
+            p.output.drain(..cut);
+        }
+    }
+
+    fn view(&self) -> LoginView {
+        let p = self.progress();
+        LoginView {
+            running: p.exit.is_none(),
+            output: clean(&String::from_utf8_lossy(&p.output)),
+            exit: p.exit.clone(),
+            started_at: p.started_at.clone(),
+        }
+    }
+}
+
+/// The sign-ins started from the page, one at most per agent.
+#[derive(Debug, Default)]
+pub struct Logins {
+    by_agent: Mutex<HashMap<String, Arc<Login>>>,
+}
+
+impl Logins {
+    fn map(&self) -> std::sync::MutexGuard<'_, HashMap<String, Arc<Login>>> {
+        self.by_agent.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn find(&self, name: &str) -> Option<Arc<Login>> {
+        self.map().get(name).cloned()
+    }
+
+    /// Start signing `name` in, stopping a sign-in already running for it.
+    pub fn start(&self, name: &str, agent: &AgentSettings) -> Result<LoginView> {
+        let args = agent.login_args();
+        if args.is_empty() {
+            bail!("signing in from the page is turned off for agent {name}");
+        }
+        let child = command(agent, &args)
+            .stdin(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("cannot run {} {}", agent.command, args.join(" ")))?;
+        let login = watch(child);
+        if let Some(old) = self.map().insert(name.to_owned(), Arc::clone(&login)) {
+            old.stop.notify_one();
+        }
+        Ok(login.view())
+    }
+
+    /// The latest sign-in for `name`, if any.
+    pub fn get(&self, name: &str) -> Option<LoginView> {
+        self.find(name).map(|l| l.view())
+    }
+
+    /// Send one line to the running sign-in, such as a pasted code.
+    pub async fn input(&self, name: &str, text: &str) -> Result<()> {
+        let login = self.find(name).context("no sign-in is running")?;
+        let mut stdin = login.stdin.lock().await;
+        let pipe = stdin.as_mut().context("the sign-in has ended")?;
+        let line = format!("{}\n", text.trim_end_matches(['\r', '\n']));
+        pipe.write_all(line.as_bytes()).await?;
+        pipe.flush().await?;
+        Ok(())
+    }
+
+    /// Stop the running sign-in for `name`.
+    pub fn cancel(&self, name: &str) -> Result<()> {
+        let login = self.find(name).context("no sign-in is running")?;
+        login.stop.notify_one();
+        Ok(())
+    }
+}
+
+/// Run the agent's status command.
+pub async fn status(agent: &AgentSettings) -> LoginStatus {
+    let args = agent.status_args();
+    if args.is_empty() {
+        return LoginStatus {
+            signed_in: None,
+            detail: "no status command is set".to_owned(),
+        };
+    }
+    let run = command(agent, &args).stdin(Stdio::null()).output();
+    let (signed_in, detail) = match tokio::time::timeout(STATUS_TIMEOUT, run).await {
+        Ok(Ok(out)) => {
+            let text = [out.stdout, out.stderr].concat();
+            (
+                Some(out.status.success()),
+                clean(&String::from_utf8_lossy(&text)),
+            )
+        }
+        Ok(Err(e)) => (None, format!("cannot run {}: {e}", agent.command)),
+        Err(_) => (None, format!("{} did not answer in time", agent.command)),
+    };
+    LoginStatus {
+        signed_in,
+        detail: tail(detail.trim(), 2_000),
+    }
+}
+
+fn command(agent: &AgentSettings, args: &[String]) -> Command {
+    let mut cmd = Command::new(&agent.command);
+    cmd.args(args)
+        .envs(&agent.env)
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .kill_on_drop(true);
+    cmd
+}
+
+/// Collect the child's output and wait for it to end, be stopped or time out.
+fn watch(mut child: Child) -> Arc<Login> {
+    let login = Arc::new(Login {
+        progress: Mutex::new(Progress {
+            output: Vec::new(),
+            exit: None,
+            started_at: crate::db::now(),
+        }),
+        stdin: tokio::sync::Mutex::new(child.stdin.take()),
+        stop: Notify::new(),
+    });
+    let readers = [
+        child
+            .stdout
+            .take()
+            .map(|o| tokio::spawn(collect(o, Arc::clone(&login)))),
+        child
+            .stderr
+            .take()
+            .map(|e| tokio::spawn(collect(e, Arc::clone(&login)))),
+    ];
+    tokio::spawn(finish(child, Arc::clone(&login), readers));
+    login
+}
+
+type Reader = Option<tokio::task::JoinHandle<()>>;
+
+/// Record how the sign-in ended once its output is read.
+async fn finish(mut child: Child, login: Arc<Login>, readers: [Reader; 2]) {
+    let exit = wait(&mut child, &login).await;
+    for reader in readers.into_iter().flatten() {
+        // A process the CLI left behind may hold the pipes open.
+        let abort = reader.abort_handle();
+        if tokio::time::timeout(Duration::from_secs(2), reader)
+            .await
+            .is_err()
+        {
+            abort.abort();
+        }
+    }
+    *login.stdin.lock().await = None;
+    login.progress().exit = Some(exit);
+}
+
+/// Wait for the child to end, be stopped or time out, and say which.
+async fn wait(child: &mut Child, login: &Login) -> String {
+    let stopped = tokio::select! {
+        status = child.wait() => return status.map_or_else(|e| format!("failed: {e}"), describe),
+        () = login.stop.notified() => "stopped",
+        () = tokio::time::sleep(LOGIN_TIMEOUT) => "timed out",
+    };
+    crate::process::kill_group(child);
+    let _ = child.kill().await;
+    stopped.to_owned()
+}
+
+async fn collect(mut from: impl AsyncRead + Unpin, login: Arc<Login>) {
+    let mut buf = [0u8; 4096];
+    while let Ok(n) = from.read(&mut buf).await {
+        if n == 0 {
+            break;
+        }
+        login.append(&buf[..n]);
+    }
+}
+
+fn describe(status: ExitStatus) -> String {
+    match status.code() {
+        Some(0) => "finished".to_owned(),
+        Some(code) => format!("failed with exit code {code}"),
+        None => "ended by a signal".to_owned(),
+    }
+}
+
+/// Drop terminal escape sequences and carriage returns.
+fn clean(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{1b}' => skip_escape(&mut chars),
+            '\r' if chars.peek() != Some(&'\n') => out.push('\n'),
+            '\r' => {}
+            c if c.is_control() && c != '\n' && c != '\t' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn skip_escape(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    match chars.next() {
+        // CSI: parameters, then one final byte from @ to ~.
+        Some('[') => {
+            for c in chars.by_ref() {
+                if ('@'..='~').contains(&c) {
+                    break;
+                }
+            }
+        }
+        // OSC, such as a hyperlink: up to BEL or ESC \.
+        Some(']') => {
+            while let Some(c) = chars.next() {
+                if c == '\u{7}' || (c == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The last `limit` bytes of `text`, cut at a character boundary.
+fn tail(text: &str, limit: usize) -> String {
+    let start = (text.len().saturating_sub(limit)..=text.len())
+        .find(|i| text.is_char_boundary(*i))
+        .unwrap_or(text.len());
+    text[start..].to_owned()
+}
+
+#[cfg(test)]
+mod tests;

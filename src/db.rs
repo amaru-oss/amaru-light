@@ -40,6 +40,15 @@ pub struct Event {
     pub payload: Value,
 }
 
+/// A ticket with the times its row was created and last saved.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Listed {
+    #[serde(flatten)]
+    pub ticket: Ticket,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -164,6 +173,39 @@ impl Store {
         self.query(&sql, i64::MAX)
     }
 
+    /// The most recent tickets with their times, newest first.
+    pub fn listed(&self, limit: i64) -> Result<Vec<Listed>> {
+        self.listed_where("1 = ?1", 1, limit)
+    }
+
+    /// One ticket with its times.
+    pub fn get_listed(&self, id: i64) -> Result<Option<Listed>> {
+        Ok(self.listed_where("id = ?1", id, 1)?.pop())
+    }
+
+    fn listed_where(&self, filter: &str, value: i64, limit: i64) -> Result<Vec<Listed>> {
+        let sql = format!(
+            "SELECT data, created_at, updated_at FROM tickets WHERE {filter}
+             ORDER BY id DESC LIMIT ?2"
+        );
+        let rows: Vec<(String, String, String)> = self.with(|c| {
+            let mut stmt = c.prepare(&sql)?;
+            let rows = stmt.query_map(params![value, limit], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })?;
+        rows.into_iter()
+            .map(|(data, created_at, updated_at)| {
+                Ok(Listed {
+                    ticket: decode(&data)?,
+                    created_at,
+                    updated_at,
+                })
+            })
+            .collect()
+    }
+
     /// The most recent tickets, newest first.
     pub fn recent(&self, limit: i64) -> Result<Vec<Ticket>> {
         self.query("SELECT data FROM tickets ORDER BY id DESC LIMIT ?1", limit)
@@ -274,5 +316,22 @@ mod tests {
         assert_eq!(events[0].kind, "CLAIMED");
         assert_eq!(events[1].payload["to"], "PREPARING");
         assert_eq!(store.events(ticket.id, events[0].id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn lists_tickets_with_their_times() {
+        let (_dir, store) = store();
+        store.claim("me/a", 1, "one", Origin::Manual).unwrap();
+        store.claim("me/a", 2, "two", Origin::Manual).unwrap();
+        let all = store.listed(10).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].ticket.number, 2);
+        assert!(!all[0].created_at.is_empty());
+        let one = store.get_listed(all[1].ticket.id).unwrap().unwrap();
+        assert_eq!(one.ticket.title, "one");
+        assert!(store.get_listed(99).unwrap().is_none());
+        let json = serde_json::to_value(&one).unwrap();
+        assert_eq!(json["number"], 1);
+        assert!(json["updated_at"].is_string());
     }
 }

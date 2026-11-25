@@ -5,7 +5,7 @@
 //! error instead of a silent default.
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fmt,
@@ -95,9 +95,41 @@ pub struct AgentSettings {
     /// Extra environment variables for the agent process.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Arguments that sign the CLI in, run from the web page. Each driver
+    /// has a default; an empty list turns signing in from the page off.
+    #[serde(default)]
+    pub login: Option<Vec<String>>,
+    /// Arguments that tell whether the CLI is signed in: exit code 0 means
+    /// it is. Each driver has a default.
+    #[serde(default)]
+    pub login_status: Option<Vec<String>>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+impl AgentSettings {
+    /// The arguments that sign the CLI in.
+    pub fn login_args(&self) -> Vec<String> {
+        self.login.clone().unwrap_or_else(|| match self.driver {
+            DriverKind::Claude => strings(&["auth", "login"]),
+            DriverKind::Codex => strings(&["login", "--device-auth"]),
+        })
+    }
+
+    /// The arguments that report whether the CLI is signed in.
+    pub fn status_args(&self) -> Vec<String> {
+        self.login_status
+            .clone()
+            .unwrap_or_else(|| match self.driver {
+                DriverKind::Claude => strings(&["auth", "status", "--text"]),
+                DriverKind::Codex => strings(&["login", "status"]),
+            })
+    }
+}
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| (*s).to_owned()).collect()
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DriverKind {
     Claude,
@@ -125,6 +157,34 @@ pub struct DaemonSettings {
     pub agents: BTreeMap<String, AgentSettings>,
     /// Project files, relative to this file.
     pub projects: Vec<PathBuf>,
+    /// The web interface that `amaru serve` starts.
+    #[serde(default)]
+    pub web: WebSettings,
+}
+
+/// The web interface and its HTTP API.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSettings {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Address and port to listen on. Only this machine can connect to the
+    /// default; a container needs `0.0.0.0:8765` and a port mapping.
+    #[serde(default = "default_listen")]
+    pub listen: String,
+}
+
+impl Default for WebSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            listen: default_listen(),
+        }
+    }
+}
+
+fn default_listen() -> String {
+    "127.0.0.1:8765".into()
 }
 
 fn default_state_dir() -> PathBuf {
@@ -355,6 +415,18 @@ impl Settings {
     fn validate(&self) -> Result<()> {
         if !(1..=MAX_PARALLEL).contains(&self.daemon.max_parallel) {
             bail!("max_parallel must be between 1 and {MAX_PARALLEL}");
+        }
+        if self
+            .daemon
+            .web
+            .listen
+            .parse::<std::net::SocketAddr>()
+            .is_err()
+        {
+            bail!(
+                "web.listen '{}' must be an address and a port, such as 127.0.0.1:8765",
+                self.daemon.web.listen
+            );
         }
         for project in &self.projects {
             self.validate_project(project)?;

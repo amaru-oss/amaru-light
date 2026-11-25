@@ -62,7 +62,7 @@ pub fn tail(text: &str, limit: usize) -> String {
     text[start..].to_owned()
 }
 
-fn kill_group(child: &Child) {
+pub(crate) fn kill_group(child: &Child) {
     if let Some(pid) = child.id().and_then(|id| i32::try_from(id).ok()) {
         let group = nix::unistd::Pid::from_raw(pid);
         // The group may already be gone; there is nothing to do then.
