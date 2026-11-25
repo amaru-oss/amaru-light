@@ -48,6 +48,11 @@ needs you, it comments on the issue with the reason and adds `amaru:blocked`.
 Remove the label, or run `amaru unblock <ticket>`, to let it continue where it
 stopped. Closing the issue cancels the ticket.
 
+Labelling needs write access to the repository. A bot that contributes
+through a fork often has none: then the daemon works without the labels,
+logs that it skipped them, and its comment on a blocked issue says to run
+`amaru unblock <ticket>` instead.
+
 ## Reviews
 
 After the pull request is open, the daemon polls it. Review comments,

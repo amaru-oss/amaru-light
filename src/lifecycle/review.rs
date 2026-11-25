@@ -1,6 +1,6 @@
 //! Watching the pull request and acting on the feedback it receives.
 
-use super::{BLOCKED_LABEL, Job, Services, WORKING_LABEL, blocked, turn::Session};
+use super::{BLOCKED_LABEL, Job, Services, WORKING_LABEL, blocked, try_label, turn::Session};
 use crate::{
     forge::{Feedback, FeedbackKind, PullRequest},
     settings::ProjectSettings,
@@ -96,10 +96,8 @@ pub async fn poll_review(svc: &Services, mut ticket: Ticket) -> Result<Ticket> {
         ticket.blocked_from = Some(State::AwaitingReview);
         ticket.reason = Some("the pull request was closed without merging".into());
         ticket.state = State::Blocked;
+        try_label(svc, &mut ticket, BLOCKED_LABEL).await;
         svc.store.save(&ticket)?;
-        svc.source
-            .add_label(&ticket.repo, ticket.number, BLOCKED_LABEL)
-            .await?;
     } else if !pending(svc, project, &ticket, &pr).await?.is_empty() {
         ticket.state = State::AddressingReview;
         svc.store.save(&ticket)?;

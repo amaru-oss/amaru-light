@@ -130,6 +130,10 @@ pub struct Ticket {
     pub complete: bool,
     #[serde(default)]
     pub self_reviewed: bool,
+    /// Labels the daemon managed to add to the issue. Removing the blocked
+    /// label resumes the ticket only when it is listed here.
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 impl Ticket {
@@ -157,6 +161,7 @@ impl Ticket {
             summary: None,
             complete: false,
             self_reviewed: false,
+            labels: Vec::new(),
         }
     }
 

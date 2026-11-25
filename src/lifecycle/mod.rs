@@ -194,20 +194,52 @@ impl<'a> Job<'a> {
         self.ticket.blocked_from = Some(self.ticket.state);
         self.ticket.blocked_at = Some(now());
         self.ticket.reason = Some(reason.to_owned());
+        let labelled = try_label(self.svc, &mut self.ticket, BLOCKED_LABEL).await;
         self.transition(State::Blocked)?;
         let (repo, number) = (&self.ticket.repo, self.ticket.number);
-        let body = format!(
-            "Amaru stopped working on this issue:\n\n> {reason}\n\nRemove the `{BLOCKED_LABEL}` label to let it continue."
-        );
+        let next = if labelled {
+            format!("Remove the `{BLOCKED_LABEL}` label to let it continue.")
+        } else {
+            format!("Run `amaru unblock {}` to let it continue.", self.ticket.id)
+        };
+        let body = format!("Amaru stopped working on this issue:\n\n> {reason}\n\n{next}");
         self.svc.source.comment(repo, number, &body).await?;
-        self.svc
-            .source
-            .add_label(repo, number, BLOCKED_LABEL)
-            .await?;
         self.svc
             .source
             .remove_label(repo, number, WORKING_LABEL)
             .await
+    }
+}
+
+/// Add a label to the ticket's issue and remember it; true when it is on the
+/// issue.
+///
+/// Labelling needs write access to the repository, which a bot that
+/// contributes through a fork often lacks. Without it the ticket goes on and
+/// the failure is logged and recorded as an event.
+pub async fn try_label(svc: &Services, ticket: &mut Ticket, label: &str) -> bool {
+    match svc
+        .source
+        .add_label(&ticket.repo, ticket.number, label)
+        .await
+    {
+        Ok(()) => {
+            if !ticket.labels.iter().any(|l| l == label) {
+                ticket.labels.push(label.to_owned());
+            }
+            true
+        }
+        Err(e) => {
+            let error = format!("{e:#}");
+            crate::scheduler::log(&format!(
+                "{}: cannot add the {label} label: {error}",
+                ticket.reference()
+            ));
+            let payload = json!({ "label": label, "error": error });
+            // Losing this event only loses the note; the ticket goes on.
+            let _ = svc.store.event(ticket.id, "LABEL_SKIPPED", &payload);
+            false
+        }
     }
 }
 
@@ -216,6 +248,7 @@ pub fn unblock(ticket: &mut Ticket) {
     ticket.state = ticket.blocked_from.take().unwrap_or(State::Queued);
     ticket.reason = None;
     ticket.blocked_at = None;
+    ticket.labels.retain(|l| l != BLOCKED_LABEL);
     ticket.fix_rounds = 0;
     if ticket.state == State::AddressingReview {
         ticket.review_rounds = 0;

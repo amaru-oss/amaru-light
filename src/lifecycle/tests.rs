@@ -124,3 +124,18 @@ async fn unblock_returns_to_the_blocked_state() {
     assert_eq!(ticket.state, State::Checking);
     assert_eq!(ticket.fix_rounds, 0);
 }
+
+#[tokio::test]
+async fn works_without_permission_to_label_issues() {
+    let fake = Fake::new("false").await;
+    fake.forge.state().deny_labels = true;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::Blocked);
+    assert!(ticket.labels.is_empty());
+    let forge = fake.forge.state();
+    assert!(forge.labels.is_empty());
+    let (_, last) = forge.comments.last().unwrap();
+    assert!(last.contains(&format!("amaru unblock {}", ticket.id)));
+    let events = fake.svc.store.events(ticket.id, 0).unwrap();
+    assert!(events.iter().any(|e| e.kind == "LABEL_SKIPPED"));
+}
