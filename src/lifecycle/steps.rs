@@ -1,6 +1,6 @@
 //! The steps from a claimed issue to an open pull request.
 
-use super::{Job, WORKING_LABEL, blocked, turn::Session, turn::as_refs};
+use super::{Job, WORKING_LABEL, blocked, try_label, turn::Session, turn::as_refs};
 use crate::{
     checks,
     contract::{Report, Status},
@@ -26,10 +26,7 @@ impl Job<'_> {
             slug(&self.ticket.title)
         ));
         self.choose_base(&issue.blocked_by)?;
-        self.svc
-            .source
-            .add_label(&repo, number, WORKING_LABEL)
-            .await?;
+        try_label(self.svc, &mut self.ticket, WORKING_LABEL).await;
         let branch = self.ticket.branch.clone().unwrap_or_default();
         let note = format!("Amaru is working on this issue on branch `{branch}`.");
         self.svc.source.comment(&repo, number, &note).await?;

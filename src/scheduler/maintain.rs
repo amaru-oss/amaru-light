@@ -22,7 +22,10 @@ impl Scheduler {
             return self.svc.store.save(&ticket);
         }
         match ticket.state {
-            State::Blocked if !has_label(&issue, BLOCKED_LABEL) => {
+            State::Blocked
+                if ticket.labels.iter().any(|l| l == BLOCKED_LABEL)
+                    && !has_label(&issue, BLOCKED_LABEL) =>
+            {
                 unblock(&mut ticket);
                 log(&format!("{} unblocked", ticket.reference()));
                 self.svc.store.save(&ticket)

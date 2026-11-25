@@ -98,3 +98,18 @@ async fn a_milestone_drain_stops_when_nothing_is_left() {
     run.await.unwrap().unwrap();
     assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
 }
+
+#[tokio::test]
+async fn a_blocked_ticket_without_its_label_waits_for_unblock() {
+    let fake = Fake::new("false").await;
+    fake.forge.state().deny_labels = true;
+    fake.forge.update_issue(1, |_| {});
+    let scheduler = scheduler(&fake, Intake::Autonomous);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::Blocked)]);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::Blocked)]);
+    let mut ticket = fake.svc.store.open_ticket("me/app", 1).unwrap().unwrap();
+    crate::lifecycle::unblock(&mut ticket);
+    assert_eq!(ticket.state, State::Checking);
+}

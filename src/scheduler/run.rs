@@ -16,7 +16,7 @@ impl Scheduler {
             let (stop, cancel) = watch::channel(false);
             lock(&self.running)?.insert(ticket.id, stop);
             let me = Arc::clone(self);
-            tokio::spawn(async move { me.work(ticket, cancel).await });
+            tokio::spawn(async move { Box::pin(me.work(ticket, cancel)).await });
         }
         Ok(())
     }

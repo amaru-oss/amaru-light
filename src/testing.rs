@@ -48,6 +48,8 @@ pub struct ForgeState {
     pub feedback: Vec<Feedback>,
     pub replies: Vec<(String, String)>,
     pub merged: bool,
+    /// Refuse to label issues, as for a bot without write access.
+    pub deny_labels: bool,
     /// Issues the forge knows; unknown numbers are open, plain issues.
     pub issues: Vec<Issue>,
 }
@@ -136,7 +138,9 @@ impl TicketSource for FakeForge {
         Ok(())
     }
     async fn add_label(&self, _: &str, number: u64, label: &str) -> Result<()> {
-        self.state().labels.push((number, label.into()));
+        let mut state = self.state();
+        anyhow::ensure!(!state.deny_labels, "Must have admin rights to Repository.");
+        state.labels.push((number, label.into()));
         Ok(())
     }
     async fn remove_label(&self, _: &str, number: u64, label: &str) -> Result<()> {
