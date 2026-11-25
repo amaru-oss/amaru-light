@@ -8,7 +8,7 @@
 # Usage: scripts/test-image.sh [image]
 # Environment: RUNTIME (podman or docker; default podman if installed).
 set -eu
-image=${1:-localhost/mini-amaru:latest}
+image=${1:-localhost/amaru-light:latest}
 if [ -z "${RUNTIME:-}" ]; then
     if command -v podman >/dev/null 2>&1; then RUNTIME=podman; else RUNTIME=docker; fi
 fi

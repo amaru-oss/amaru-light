@@ -153,5 +153,6 @@ push and a reply per addressed thread. The daemon never resolves threads.
 - The v1 runtime (job engine, delivery loop, HTTP API and web dashboard) is
   removed. The daemon has no HTTP interface; `amaru status` and the labels
   and comments on each issue show what it is doing.
-- The crate keeps the name `mini-amaru` and the image `ghcr.io/amaru-oss/mini-amaru`,
-  so published image names and volumes keep working. The binary is `amaru`.
+- The crate keeps the name `mini-amaru`. The image is published as
+  `ghcr.io/amaru-oss/amaru-light`; the runtime user and home stay `mini-amaru`,
+  so existing volumes keep working. The binary is `amaru`.

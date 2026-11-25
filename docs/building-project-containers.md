@@ -20,15 +20,15 @@ credentials and local account configuration outside the build context.
 ## Extend the base image
 
 Run `make image` in the Amaru Light source checkout to build
-`localhost/mini-amaru:latest`. The current tag uses Fedora Minimal 45 and
+`localhost/amaru-light:latest`. The current tag uses Fedora Minimal 45 and
 includes the `amaru` binary, Git, GitHub CLI, and
 [ripwire](https://github.com/redhat-et/ripwire), a code map tool that helps
-agents find relevant code with fewer tokens. The image name and the runtime
-username are still `mini-amaru`.
+agents find relevant code with fewer tokens. The runtime username is still
+`mini-amaru`.
 
 Instead of a local build, you can pull the published base image,
-`ghcr.io/amaru-oss/mini-amaru:latest`, or a release version such as
-`ghcr.io/amaru-oss/mini-amaru:0.1.0`, and use it in the `FROM` line. CI
+`ghcr.io/amaru-oss/amaru-light:latest`, or a release version such as
+`ghcr.io/amaru-oss/amaru-light:0.1.0`, and use it in the `FROM` line. CI
 publishes it for `amd64` and `arm64` after the checks pass on `main` and on
 release tags.
 
@@ -48,7 +48,7 @@ build context. Replace the package list and agent installation step with
 the versions and commands that fit your project.
 
 ```dockerfile
-FROM localhost/mini-amaru:latest
+FROM localhost/amaru-light:latest
 
 USER root
 RUN microdnf install -y golang make && microdnf clean all

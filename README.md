@@ -166,7 +166,7 @@ checkouts.
 ## Container image
 
 ```sh
-make image          # localhost/mini-amaru:latest
+make image          # localhost/amaru-light:latest
 make image-check    # build it and run scripts/test-image.sh
 ```
 
@@ -181,7 +181,7 @@ and a volume at `/data`, with `state_dir: /data`.
 Derive one image per project with its agent CLI and build tools:
 [docs/building-project-containers.md](docs/building-project-containers.md).
 
-CI publishes the image to `ghcr.io/amaru-oss/mini-amaru` for `amd64` and
+CI publishes the image to `ghcr.io/amaru-oss/amaru-light` for `amd64` and
 `arm64`: `latest` and the commit SHA after a push to `main`, the version and
 the commit SHA after a release tag.
 

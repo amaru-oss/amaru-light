@@ -144,9 +144,10 @@ projects:
 | `/app/data`, `/app/repos` | `state_dir`. The base image declares a `/data` volume for it; you can also put `state_dir` in the home volume. |
 | `curl /api/health` | `amaru -c /config/amaru.yaml doctor` |
 
-The image name (`ghcr.io/amaru-oss/mini-amaru`) and the runtime user
-(`mini-amaru`, home `/home/mini-amaru`) did not change, so existing home
-volumes with agent logins keep working.
+The image is now published as `ghcr.io/amaru-oss/amaru-light` (it was
+`ghcr.io/amaru-oss/mini-amaru`); update the `FROM` line of derived images. The
+runtime user (`mini-amaru`, home `/home/mini-amaru`) did not change, so
+existing home volumes with agent logins keep working.
 
 See [Build a project container](building-project-containers.md) for a
 complete derived image.
