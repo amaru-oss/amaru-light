@@ -81,6 +81,40 @@ async fn addresses_review_feedback_from_allowed_reviewers_only() {
 }
 
 #[tokio::test]
+async fn reacts_once_to_each_comment_it_picks_up() {
+    let fake = Fake::new("").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    fake.forge.add_feedback(feedback("line-7", "me"));
+    fake.forge.add_feedback(feedback("line-8", "stranger"));
+    let ticket = poll_review(&fake.svc, ticket).await.unwrap();
+    assert_eq!(fake.forge.state().reactions, ["line-7"]);
+    // A comment that lands before the agent starts is reacted to as well.
+    fake.forge.add_feedback(feedback("comment-9", "me"));
+    let ticket = drive(&fake, ticket).await;
+    assert_eq!(ticket.handled_feedback, ["line-7", "comment-9"]);
+    let ticket = poll_review(&fake.svc, ticket).await.unwrap();
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert_eq!(fake.forge.state().reactions, ["line-7", "comment-9"]);
+    assert_eq!(ticket.reacted_feedback, ["line-7", "comment-9"]);
+}
+
+#[tokio::test]
+async fn goes_on_when_reactions_are_refused() {
+    let fake = Fake::new("").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    fake.forge.state().denied.reactions = true;
+    fake.forge.add_feedback(feedback("line-7", "me"));
+    let ticket = poll_review(&fake.svc, ticket).await.unwrap();
+    assert_eq!(ticket.state, State::AddressingReview);
+    let ticket = drive(&fake, ticket).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert_eq!(ticket.handled_feedback, ["line-7"]);
+    assert_eq!(ticket.reacted_feedback, ["line-7"]);
+    let events = fake.svc.store.events(ticket.id, 0).unwrap();
+    assert!(events.iter().any(|e| e.kind == "REACTION_SKIPPED"));
+}
+
+#[tokio::test]
 async fn finishes_when_the_pull_request_is_merged() {
     let fake = Fake::new("").await;
     let ticket = drive(&fake, fake.claim(1).await).await;
@@ -111,6 +145,7 @@ fn feedback(id: &str, author: &str) -> Feedback {
         body: "please rename".into(),
         path: Some("feature.txt".into()),
         line: Some(1),
+        node_id: Some(format!("node-{id}")),
     }
 }
 
@@ -128,7 +163,7 @@ async fn unblock_returns_to_the_blocked_state() {
 #[tokio::test]
 async fn works_without_permission_to_label_issues() {
     let fake = Fake::new("false").await;
-    fake.forge.state().deny_labels = true;
+    fake.forge.state().denied.labels = true;
     let ticket = drive(&fake, fake.claim(1).await).await;
     assert_eq!(ticket.state, State::Blocked);
     assert!(ticket.labels.is_empty());

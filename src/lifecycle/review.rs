@@ -66,6 +66,38 @@ async fn pending(
     Ok(actionable(project, bot, ticket, all))
 }
 
+/// React to feedback the agent will act on, so the reviewer sees it is being
+/// addressed. Best-effort: a token that may not react must not stop the
+/// ticket. Each review or comment gets one attempt, whatever the outcome.
+async fn acknowledge(
+    svc: &Services,
+    project: &ProjectSettings,
+    ticket: &mut Ticket,
+    feedback: &[Feedback],
+) {
+    let reaction = project.review.reaction;
+    if reaction.github_name().is_none() {
+        return;
+    }
+    for item in feedback {
+        if item.kind == FeedbackKind::FailedCheck || ticket.reacted_feedback.contains(&item.id) {
+            continue;
+        }
+        ticket.reacted_feedback.push(item.id.clone());
+        if let Err(e) = svc.forge.react(item, reaction).await {
+            let error = format!("{e:#}");
+            crate::scheduler::log(&format!(
+                "{}: cannot react to {}: {error}",
+                ticket.reference(),
+                item.id
+            ));
+            let payload = json!({ "feedback": item.id, "error": error });
+            // Losing this event only loses the note; the ticket goes on.
+            let _ = svc.store.event(ticket.id, "REACTION_SKIPPED", &payload);
+        }
+    }
+}
+
 async fn finish(svc: &Services, ticket: &mut Ticket) -> Result<()> {
     ticket.state = State::Done;
     svc.store.save(ticket)?;
@@ -98,16 +130,25 @@ pub async fn poll_review(svc: &Services, mut ticket: Ticket) -> Result<Ticket> {
         ticket.state = State::Blocked;
         try_label(svc, &mut ticket, BLOCKED_LABEL).await;
         svc.store.save(&ticket)?;
-    } else if !pending(svc, project, &ticket, &pr).await?.is_empty() {
-        ticket.state = State::AddressingReview;
-        svc.store.save(&ticket)?;
-        svc.store.event(
-            ticket.id,
-            "STATE",
-            &json!({ "to": State::AddressingReview }),
-        )?;
+    } else {
+        let feedback = pending(svc, project, &ticket, &pr).await?;
+        if feedback.is_empty() {
+            return Ok(ticket);
+        }
+        acknowledge(svc, project, &mut ticket, &feedback).await;
+        start_addressing(svc, &mut ticket)?;
     }
     Ok(ticket)
+}
+
+fn start_addressing(svc: &Services, ticket: &mut Ticket) -> Result<()> {
+    ticket.state = State::AddressingReview;
+    svc.store.save(ticket)?;
+    svc.store.event(
+        ticket.id,
+        "STATE",
+        &json!({ "to": State::AddressingReview }),
+    )
 }
 
 impl Job<'_> {
@@ -122,6 +163,7 @@ impl Job<'_> {
         if feedback.is_empty() {
             return Ok(State::AwaitingReview);
         }
+        self.acknowledge(&feedback).await?;
         self.next_review_round()?;
         let prompt = self.svc.prompts.render(
             "address_review",
@@ -140,6 +182,12 @@ impl Job<'_> {
             .handled_feedback
             .extend(feedback.into_iter().map(|f| f.id));
         Ok(State::AwaitingReview)
+    }
+
+    /// React to feedback that arrived after the poll, and remember it.
+    async fn acknowledge(&mut self, feedback: &[Feedback]) -> Result<()> {
+        acknowledge(self.svc, self.project, &mut self.ticket, feedback).await;
+        self.save()
     }
 
     fn next_review_round(&mut self) -> Result<()> {

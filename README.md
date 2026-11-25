@@ -69,6 +69,8 @@ After the pull request is open, the daemon polls it. Review comments,
 reviews that request changes and failing CI start a new round in the same
 session, up to `review.max_rounds`. Only feedback from the logins in
 `review.reviewers` reaches the agent, and the bot's own comments are ignored.
+The bot puts a 👍 on each review and comment it picks up (`review.reaction`),
+so the reviewer can see it is being addressed.
 
 Self-review is optional per project: `off` (only act on reviews received),
 `same_agent` (the working session reviews its own diff) or `other_agent` (a

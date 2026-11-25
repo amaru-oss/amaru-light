@@ -3,7 +3,10 @@
 
 use crate::{
     db::Store,
-    forge::{Feedback, Forge, Issue, NewPullRequest, PullRequest, Selector, Target, TicketSource},
+    forge::{
+        Feedback, Forge, Issue, NewPullRequest, PullRequest, Reaction, Selector, Target,
+        TicketSource,
+    },
     lifecycle::Services,
     process,
     prompts::Prompts,
@@ -41,15 +44,25 @@ echo '{"type":"result","is_error":false,"result":"ok","session_id":"sess-1"}'
 "#;
 
 #[derive(Debug, Default)]
+pub struct Denied {
+    /// Labelling issues.
+    pub labels: bool,
+    /// Reacting to reviews and comments.
+    pub reactions: bool,
+}
+
+#[derive(Debug, Default)]
 pub struct ForgeState {
     pub comments: Vec<(u64, String)>,
     pub labels: Vec<(u64, String)>,
     pub prs: Vec<NewPullRequest>,
     pub feedback: Vec<Feedback>,
     pub replies: Vec<(String, String)>,
+    /// Feedback ids reacted to, in order.
+    pub reactions: Vec<String>,
     pub merged: bool,
-    /// Refuse to label issues, as for a bot without write access.
-    pub deny_labels: bool,
+    /// Calls the forge refuses, as for a bot without write access.
+    pub denied: Denied,
     /// Issues the forge knows; unknown numbers are open, plain issues.
     pub issues: Vec<Issue>,
 }
@@ -139,7 +152,10 @@ impl TicketSource for FakeForge {
     }
     async fn add_label(&self, _: &str, number: u64, label: &str) -> Result<()> {
         let mut state = self.state();
-        anyhow::ensure!(!state.deny_labels, "Must have admin rights to Repository.");
+        anyhow::ensure!(
+            !state.denied.labels,
+            "Must have admin rights to Repository."
+        );
         state.labels.push((number, label.into()));
         Ok(())
     }
@@ -169,6 +185,15 @@ impl Forge for FakeForge {
     }
     async fn reply(&self, _: &str, _: u64, to: &Feedback, body: &str) -> Result<()> {
         self.state().replies.push((to.id.clone(), body.into()));
+        Ok(())
+    }
+    async fn react(&self, to: &Feedback, _: Reaction) -> Result<()> {
+        let mut state = self.state();
+        anyhow::ensure!(
+            !state.denied.reactions,
+            "Resource not accessible by integration"
+        );
+        state.reactions.push(to.id.clone());
         Ok(())
     }
 }

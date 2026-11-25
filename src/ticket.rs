@@ -117,6 +117,9 @@ pub struct Ticket {
     pub review_rounds: u32,
     /// Feedback handled so far: review and comment ids.
     pub handled_feedback: Vec<String>,
+    /// Feedback the daemon reacted to, or tried to, so it reacts only once.
+    #[serde(default)]
+    pub reacted_feedback: Vec<String>,
     /// When the ticket became blocked, as an RFC 3339 time.
     pub blocked_at: Option<String>,
     /// The state to return to when a human unblocks the ticket.
@@ -156,6 +159,7 @@ impl Ticket {
             fix_rounds: 0,
             review_rounds: 0,
             handled_feedback: Vec::new(),
+            reacted_feedback: Vec::new(),
             blocked_at: None,
             blocked_from: None,
             summary: None,

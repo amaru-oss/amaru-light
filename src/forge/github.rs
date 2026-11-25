@@ -1,7 +1,7 @@
 //! GitHub through the `gh` CLI, authenticated by the `GH_TOKEN` of the bot.
 
 use super::{
-    Feedback, FeedbackKind, Forge, Issue, NewPullRequest, PullRequest, Selector, Target,
+    Feedback, FeedbackKind, Forge, Issue, NewPullRequest, PullRequest, Reaction, Selector, Target,
     TicketSource, body_dependencies,
 };
 use crate::process;
@@ -65,6 +65,7 @@ fn feedback(id: String, kind: FeedbackKind, raw: &Value) -> Feedback {
         body: text(&raw["body"]),
         path: raw["path"].as_str().map(str::to_owned),
         line: raw["line"].as_u64(),
+        node_id: raw["node_id"].as_str().map(str::to_owned),
     }
 }
 
@@ -296,6 +297,23 @@ impl Forge for GitHub {
         }
         Ok(())
     }
+
+    async fn react(&self, to: &Feedback, reaction: Reaction) -> Result<()> {
+        let Some(content) = reaction.github_name() else {
+            return Ok(());
+        };
+        let id = to
+            .node_id
+            .as_deref()
+            .with_context(|| format!("{} has no node id to react to", to.id))?;
+        // GraphQL, because reviews have no REST endpoint for reactions.
+        let query = format!(
+            "query=mutation($id: ID!) {{ addReaction(input: {{subjectId: $id, content: {content}}}) {{ reaction {{ content }} }} }}"
+        );
+        self.api(&["graphql", "-f", &query, "-f", &format!("id={id}")])
+            .await?;
+        Ok(())
+    }
 }
 
 impl GitHub {
@@ -340,6 +358,7 @@ impl GitHub {
                 ),
                 path: None,
                 line: None,
+                node_id: None,
             })
             .collect())
     }

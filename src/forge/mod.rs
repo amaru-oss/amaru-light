@@ -87,6 +87,39 @@ pub struct Feedback {
     pub body: String,
     pub path: Option<String>,
     pub line: Option<u64>,
+    /// GitHub's global id of the review or comment, used to react to it.
+    #[serde(default)]
+    pub node_id: Option<String>,
+}
+
+/// The emoji the daemon puts on feedback it picks up.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Reaction {
+    /// React to nothing.
+    Off,
+    #[default]
+    ThumbsUp,
+    Eyes,
+    Heart,
+    Rocket,
+    Hooray,
+    Laugh,
+}
+
+impl Reaction {
+    /// The name GitHub's GraphQL API uses.
+    pub const fn github_name(self) -> Option<&'static str> {
+        match self {
+            Self::Off => None,
+            Self::ThumbsUp => Some("THUMBS_UP"),
+            Self::Eyes => Some("EYES"),
+            Self::Heart => Some("HEART"),
+            Self::Rocket => Some("ROCKET"),
+            Self::Hooray => Some("HOORAY"),
+            Self::Laugh => Some("LAUGH"),
+        }
+    }
 }
 
 #[async_trait]
@@ -111,6 +144,9 @@ pub trait Forge: Send + Sync {
     async fn feedback(&self, repo: &str, pr: &PullRequest) -> Result<Vec<Feedback>>;
     /// Answer feedback: in its thread for line comments, otherwise on the PR.
     async fn reply(&self, repo: &str, pr: u64, to: &Feedback, body: &str) -> Result<()>;
+    /// Put an emoji on a review or comment. Reacting twice with the same
+    /// emoji leaves one reaction.
+    async fn react(&self, to: &Feedback, reaction: Reaction) -> Result<()>;
 }
 
 /// What a new pull request contains.

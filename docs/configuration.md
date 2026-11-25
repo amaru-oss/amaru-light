@@ -123,6 +123,7 @@ review:
   reviewers: [owner]
   max_rounds: 5
   fix_ci: true
+  reaction: thumbs_up
 
 workspace:
   keep_blocked: 7d
@@ -174,6 +175,7 @@ once #12 has a pull request, on a branch stacked on #12's branch.
 | `reviewers` | `[]` | Only feedback from these logins reaches the agent. With an empty list, no human feedback does. |
 | `max_rounds` | `5` | Review rounds before the ticket blocks. |
 | `fix_ci` | `true` | Treat failing CI check runs on the pull request as feedback. |
+| `reaction` | `thumbs_up` | The emoji the bot puts on each review and comment it picks up, so the reviewer sees it is being addressed: `thumbs_up`, `eyes`, `heart`, `rocket`, `hooray`, `laugh`, or `off` for none. Each one gets a single reaction, and a refused reaction does not stop the ticket. |
 
 ### Workspace
 

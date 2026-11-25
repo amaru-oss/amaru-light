@@ -128,8 +128,11 @@ A missing or invalid file triggers one resume asking for it.
 | `review.reviewers` | GitHub logins | the operator |
 | `review.max_rounds` | number | 5 |
 | `review.fix_ci` | `true`, `false` | `true` |
+| `review.reaction` | `thumbs_up`, `eyes`, `heart`, `rocket`, `hooray`, `laugh`, `off` | `thumbs_up` |
 
-Only allowlisted reviewers' comments reach the agent. Each round produces one
+Only allowlisted reviewers' comments reach the agent. The daemon reacts once
+to each one it picks up (best-effort, through GraphQL `addReaction`, since
+reviews have no REST reactions endpoint). Each round produces one
 push and a reply per addressed thread. The daemon never resolves threads.
 
 ## Runtime and safety
