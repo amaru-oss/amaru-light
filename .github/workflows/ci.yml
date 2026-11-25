@@ -22,7 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   CONTAINER_REGISTRY: ${{ vars.CONTAINER_REGISTRY || 'ghcr.io' }}
   CONTAINER_GROUP: ${{ vars.CONTAINER_GROUP || github.repository_owner }}
-  IMAGE_NAME: mini-amaru
+  IMAGE_NAME: amaru-light
   # Unique per run so a manifest cannot combine images from different builds.
   IMAGE_BUILD_TAG: ${{ github.sha }}-${{ github.run_id }}
   # Only pushes to main and release tags publish the image.
@@ -99,11 +99,11 @@ jobs:
           docker build -f Containerfile \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            -t localhost/mini-amaru:ci .
+            -t localhost/amaru-light:ci .
       - name: Smoke-test the image
         env:
           RUNTIME: docker
-        run: scripts/test-image.sh localhost/mini-amaru:ci
+        run: scripts/test-image.sh localhost/amaru-light:ci
       # The architecture image waits under a run-specific tag. The manifest
       # job publishes the final tags only after every check passes.
       - name: Login to the registry
@@ -117,7 +117,7 @@ jobs:
         if: env.PUBLISH == 'true'
         run: |
           image="$CONTAINER_REGISTRY/$CONTAINER_GROUP/$IMAGE_NAME:$IMAGE_BUILD_TAG-$IMAGE_ARCH"
-          docker tag localhost/mini-amaru:ci "$image"
+          docker tag localhost/amaru-light:ci "$image"
           docker push "$image"
 
   image-manifest:

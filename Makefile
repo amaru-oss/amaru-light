@@ -1,6 +1,6 @@
 CARGO ?= cargo
 RUNTIME ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
-IMAGE ?= localhost/mini-amaru:latest
+IMAGE ?= localhost/amaru-light:latest
 TARGET ?=
 CONFIG ?= amaru.yaml
 
