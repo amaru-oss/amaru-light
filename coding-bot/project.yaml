@@ -1,0 +1,32 @@
+# Amaru Light working on itself (fork setup).
+repo: amaru-oss/amaru-light
+base_branch: main
+fork: orp-bot/amaru-light       # push to the bot's fork, open PRs upstream
+branch_prefix: feat/            # branches are feat/<issue>-<slug>
+
+intake:
+  # `amaru serve` picks open issues with this label. Add `assignee: orp-bot`
+  # only once orp-bot has access to the repository: GitHub assigns only
+  # people who have it. For a milestone:
+  # `amaru drain amaru-oss/amaru-light --milestone "..."`.
+  labels: [needs-implementation]
+
+agent: codex
+step_timeout: 45m
+
+checks:
+  # The same gates as CI: rustfmt, clippy with -D warnings, and the tests.
+  - name: check
+    run: make check
+    timeout: 30m
+max_fix_rounds: 3
+
+review:
+  self: same_agent              # the ticket's own session reviews its diff first
+  respond: true
+  reviewers: [orpiske]
+  max_rounds: 5
+  fix_ci: true
+
+workspace:
+  keep_blocked: 7d

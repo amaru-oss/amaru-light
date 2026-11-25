@@ -1,0 +1,27 @@
+# Daemon settings for the Amaru Light coding bot. GH_TOKEN holds orp-bot's token.
+state_dir: /home/mini-amaru/amaru   # inside the home volume, next to the Codex login
+poll_interval: 60s
+max_parallel: 1
+gh: gh
+bot_login: orp-bot
+web:
+  # 8767, so that it does not clash with the other bots (8765, 8766) on
+  # the same host. Publish it with -p 127.0.0.1:8767:8767.
+  listen: 0.0.0.0:8767
+
+agents:
+  codex:
+    driver: codex
+    command: codex
+    # The container is the sandbox, and cargo needs the network, so Codex
+    # runs without approvals and without its own sandbox.
+    args: [--dangerously-bypass-approvals-and-sandbox]
+  # Claude Code is installed too. To use it, add it here and set
+  # `agent: claude` in project.yaml, then rebuild the image.
+  # claude:
+  #   driver: claude
+  #   command: claude
+  #   args: [--permission-mode, bypassPermissions]
+
+projects:
+  - project.yaml

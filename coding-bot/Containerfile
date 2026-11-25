@@ -1,0 +1,76 @@
+# The coding bot image for Amaru Light itself: the bot (orp-bot) works on
+# amaru-oss/amaru-light issues with Codex, from its fork. It extends the
+# base image with Node.js 22 (for the agent CLIs), Codex, Claude Code, and
+# what `make check` needs: Rust (the release in rust-toolchain.toml, with
+# clippy and rustfmt) and a C compiler for the bundled SQLite.
+#
+# Build it from the repository root, with this folder as the context:
+#   podman build -f coding-bot/Containerfile -t localhost/amaru-light-amaru-light:dev coding-bot
+# For a local base image (`make image`), add
+#   --build-arg BASE_IMAGE=localhost/amaru-light:latest
+#
+# Run it with the bot's token and one home volume:
+#   export GH_TOKEN=<orp-bot token>
+#   podman run -d --name amaru-light-amaru-light -e GH_TOKEN \
+#     -p 127.0.0.1:8767:8767 \
+#     -v amaru-light-amaru-light:/home/mini-amaru:U \
+#     localhost/amaru-light-amaru-light:dev
+#
+# Then sign Codex in once, on the web interface's Agents page or with:
+#   podman exec -it amaru-light-amaru-light codex login --device-auth
+#
+# `make image-check` and `make image` cannot run in this image: it has no
+# container runtime. See docs/coding-bot.md.
+
+ARG BASE_IMAGE=ghcr.io/amaru-oss/amaru-light:latest
+
+FROM docker.io/library/node:22-trixie-slim AS node
+
+FROM ${BASE_IMAGE}
+
+# Keep this value the same as the channel in ../rust-toolchain.toml.
+ARG RUST_TOOLCHAIN=1.98.1
+
+USER root
+# gcc builds the bundled SQLite (rusqlite) and links the Rust binaries;
+# bubblewrap is Codex's sandbox, which it wants installed even when bypassed.
+RUN microdnf install -y --setopt=install_weak_deps=0 \
+        curl make gcc findutils tar gzip xz procps-ng bubblewrap \
+    && microdnf clean all
+
+# Node.js 22 from the official image, then the agent CLIs.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && npm install -g --no-audit --no-fund @openai/codex @anthropic-ai/claude-code \
+    && npm cache clean --force
+
+# Git over HTTPS gets its credentials from gh, which reads GH_TOKEN. This is
+# what `gh auth setup-git` writes, set here so no login step is necessary.
+RUN git config --system credential.https://github.com.helper '' \
+    && git config --system --add credential.https://github.com.helper '!/usr/bin/gh auth git-credential'
+
+# Rust outside the home volume, so a new image brings its own toolchain. The
+# runtime user owns it, so that cargo can write its registry cache and
+# rustup can add the release a changed rust-toolchain.toml pins.
+ENV RUSTUP_HOME=/opt/rustup \
+    CARGO_HOME=/opt/cargo \
+    PATH=/opt/cargo/bin:$PATH
+RUN mkdir -p /opt/rustup /opt/cargo && chown mini-amaru:mini-amaru /opt/rustup /opt/cargo
+
+# The daemon settings, at the path the base image's default command reads.
+COPY --chown=mini-amaru:mini-amaru amaru.yaml project.yaml /config/
+
+USER mini-amaru
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --no-modify-path --profile minimal \
+            --default-toolchain "${RUST_TOOLCHAIN}" --component clippy,rustfmt \
+    && rustc --version && cargo --version && cargo clippy --version && cargo fmt --version \
+    && cc --version | head -n 1 && make --version | head -n 1 \
+    && git --version && gh --version | head -n 1 && ripwire --version \
+    && node --version && npm --version && codex --version && claude --version \
+    && /app/bin/amaru --version
+
+# The web interface listens on this port (web.listen in amaru.yaml).
+EXPOSE 8767
