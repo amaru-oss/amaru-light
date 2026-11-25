@@ -57,6 +57,8 @@ sleep 3
     || fail "the entrypoint did not activate the ripwire skills for Claude Code"
 "$RUNTIME" exec "$name" test -d /home/mini-amaru/.agents/skills \
     || fail "the entrypoint did not activate the ripwire skills for Codex"
+"$RUNTIME" exec "$name" test -e /home/mini-amaru/.claude/agents/ripwire-locator.md \
+    || fail "the entrypoint did not install the ripwire-locator subagent for Claude Code"
 
 # The web interface, asked from inside the container with bash alone.
 "$RUNTIME" exec "$name" bash -c '

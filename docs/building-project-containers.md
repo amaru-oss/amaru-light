@@ -39,8 +39,10 @@ release tags.
 The image entrypoint, `/app/entrypoint`, activates the ripwire skills for
 Claude Code and Codex in the runtime user's home at each start, then runs
 `/app/bin/amaru`. Keep that entrypoint in derived images so the skills
-reach the home volume. If the image sets `CLAUDE_CONFIG_DIR`, the skills go
-to its `skills` directory. Set `AMARU_RIPWIRE_SKILLS=0` to skip this step.
+reach the home volume. For Claude Code it also installs the
+`ripwire-locator` subagent in `~/.claude/agents`. If the image sets
+`CLAUDE_CONFIG_DIR`, the skills and the subagent go to its `skills` and
+`agents` directories. Set `AMARU_RIPWIRE_SKILLS=0` to skip this step.
 
 Build one derived image per project. Install the agent CLI and the project's
 build and test tools in the derived image. Keep the inherited entrypoint and
