@@ -4,15 +4,20 @@
 //! example Jira) can still end as a pull request on another (GitHub).
 
 pub mod github;
+pub mod jira;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// An issue as the daemon needs it.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Issue {
     pub number: u64,
+    /// The Jira key, such as `CAMEL-12345`, for an issue from Jira.
+    #[serde(default)]
+    pub key: Option<String>,
     pub title: String,
     pub body: String,
     pub labels: Vec<String>,
@@ -147,6 +152,70 @@ pub trait Forge: Send + Sync {
     /// Put an emoji on a review or comment. Reacting twice with the same
     /// emoji leaves one reaction.
     async fn react(&self, to: &Feedback, reaction: Reaction) -> Result<()>;
+}
+
+/// Sends each project's ticket calls to its tracker: Jira for the
+/// repositories that have one, GitHub for every other.
+#[derive(Clone)]
+pub struct Trackers {
+    default: Arc<dyn TicketSource>,
+    /// Lowercase `owner/name` and the tracker for it.
+    by_repo: Vec<(String, Arc<dyn TicketSource>)>,
+}
+
+impl std::fmt::Debug for Trackers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let repos: Vec<&str> = self.by_repo.iter().map(|(r, _)| r.as_str()).collect();
+        f.debug_struct("Trackers")
+            .field("by_repo", &repos)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Trackers {
+    pub fn new(default: Arc<dyn TicketSource>) -> Self {
+        Self {
+            default,
+            by_repo: Vec::new(),
+        }
+    }
+
+    /// Use `source` for the tickets of `repo`.
+    #[must_use]
+    pub fn with(mut self, repo: &str, source: Arc<dyn TicketSource>) -> Self {
+        self.by_repo.push((repo.to_lowercase(), source));
+        self
+    }
+
+    fn of(&self, repo: &str) -> &dyn TicketSource {
+        let repo = repo.to_lowercase();
+        self.by_repo
+            .iter()
+            .find(|(r, _)| *r == repo)
+            .map_or(self.default.as_ref(), |(_, s)| s.as_ref())
+    }
+}
+
+#[async_trait]
+impl TicketSource for Trackers {
+    async fn eligible(&self, repo: &str, selector: &Selector) -> Result<Vec<Issue>> {
+        self.of(repo).eligible(repo, selector).await
+    }
+    async fn milestone(&self, repo: &str, milestone: &str) -> Result<Vec<Issue>> {
+        self.of(repo).milestone(repo, milestone).await
+    }
+    async fn issue(&self, repo: &str, number: u64) -> Result<Issue> {
+        self.of(repo).issue(repo, number).await
+    }
+    async fn comment(&self, repo: &str, number: u64, body: &str) -> Result<()> {
+        self.of(repo).comment(repo, number, body).await
+    }
+    async fn add_label(&self, repo: &str, number: u64, label: &str) -> Result<()> {
+        self.of(repo).add_label(repo, number, label).await
+    }
+    async fn remove_label(&self, repo: &str, number: u64, label: &str) -> Result<()> {
+        self.of(repo).remove_label(repo, number, label).await
+    }
 }
 
 /// What a new pull request contains.

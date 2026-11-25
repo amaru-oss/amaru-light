@@ -28,8 +28,10 @@ RUN git clone --quiet --depth 1 --branch "${RIPWIRE_VERSION}" \
 
 FROM registry.fedoraproject.org/fedora-minimal:45
 # ripwire needs `libstdc++`; its skills installer needs `bash` and `diffutils`.
+# Jira projects are read with `curl`; the minimal image may already have it.
 RUN microdnf install -y --setopt=install_weak_deps=0 ca-certificates gh git-core openssh-clients shadow-utils \
         bash diffutils libstdc++ \
+    && { command -v curl >/dev/null || microdnf install -y --setopt=install_weak_deps=0 curl; } \
     && microdnf clean all \
     && useradd --create-home --uid 1000 mini-amaru
 

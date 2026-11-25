@@ -1,6 +1,6 @@
 # Amaru Light
 
-A personal daemon that turns GitHub issues into pull requests. It claims
+A personal daemon that turns GitHub issues, or Jira issues, into pull requests. It claims
 issues, works each one in a single agent CLI session (Claude Code or Codex),
 runs the project's checks, opens a pull request and keeps fixing it from
 review feedback and CI until you merge it. It never merges.
@@ -11,6 +11,7 @@ team. The design and the reasons behind it are in [docs/design.md](docs/design.m
 | Guide | For |
 | --- | --- |
 | [Web interface](docs/web-ui.md) | Following tickets, claiming issues and signing agent CLIs in from the browser. |
+| [Jira tickets](docs/jira.md) | Working on Jira issues, such as the ASF's `CAMEL-12345`, with the code and pull requests on GitHub. |
 | [Configuration reference](docs/configuration.md) | Every key of the daemon and project files, with defaults. |
 | [GitHub access](docs/github-access.md) | The bot account, its token, fork or direct pushes, and what works without write access. |
 | [Build a project container](docs/building-project-containers.md) | A derived image with your agent CLI and toolchain. |
@@ -47,7 +48,7 @@ any step → BLOCKED (with the reason on the issue) → resumes when unblocked
 | --- | --- | --- |
 | Autonomous | `amaru serve` | Issues with one of the project's `intake.labels` and/or assigned to `intake.assignee` |
 | Milestone | `amaru drain owner/name --milestone "v1.2"` | Every open issue of the milestone, then the command exits |
-| Manual | `amaru claim owner/name#42 [--now]` | One issue you pick |
+| Manual | `amaru claim owner/name#42 [--now]`, or `amaru claim CAMEL-12345` for a [Jira project](docs/jira.md) | One issue you pick |
 
 Issues with a skip label (`amaru:hold`, `needs-human` by default) are left
 alone. Priority labels, then the milestone due date, then age decide the
@@ -220,7 +221,7 @@ the Rust stage of the `Containerfile`.
 | `lifecycle` | One ticket's steps, sessions and review rounds |
 | `agent` | Claude Code and Codex drivers |
 | `contract.rs`, `prompts.rs` | The result file and the prompts |
-| `forge` | GitHub issues and pull requests through `gh` |
+| `forge` | GitHub issues and pull requests through `gh`, Jira issues through `curl` |
 | `worktree.rs`, `checks.rs`, `process.rs` | Git, checks and child processes |
 | `db.rs`, `ticket.rs`, `settings.rs` | State and configuration |
 

@@ -134,16 +134,19 @@ workspace:
 | `repo` | required | `owner/name` of the repository whose issues the bot works on and where pull requests are opened. No trailing slash. |
 | `base_branch` | `main` | The branch that ticket branches start from and target. |
 | `fork` | none | `owner/name` of the bot's fork. When set, branches are pushed there and pull requests come from `owner:branch`. When not set, branches are pushed to `repo` itself. See [GitHub access](github-access.md). |
-| `branch_prefix` | `amaru/` | Ticket branches are `<prefix><issue>-<slug>`, for example `amaru/42-fix-the-export-button`. Include the separator, `/` or `-`, in the prefix. |
+| `branch_prefix` | `amaru/` | Ticket branches are `<prefix><issue>-<slug>`, for example `amaru/42-fix-the-export-button` or, for a Jira issue, `amaru/CAMEL-12345-fix-the-export-button`. Include the separator, `/` or `-`, in the prefix. |
 | `agent` | required | A name from `agents:` in the daemon file. |
 | `step_timeout` | `45m` | The longest one agent turn may run. |
 | `checks` | `[]` | Commands the daemon runs itself after each agent turn, in order, through `sh -c` in the ticket's worktree. |
 | `max_fix_rounds` | `3` | How many times failing checks go back to the agent before the ticket blocks. |
+| `jira` | none | Take the tickets from a Jira project instead of the repository's GitHub issues. See [Jira](#jira) below. |
 
 ### Intake
 
 `intake` decides which issues `amaru serve` picks up by itself. It needs
-`labels`, `assignee` or both: an issue that matches either is eligible.
+`labels`, `assignee` or both: an issue that matches either is eligible. A
+project with `jira` may leave it out, and its issues are then claimed by hand
+only.
 Issues claimed by hand (`amaru claim`) or through a milestone
 (`amaru drain`) ignore `labels` and `assignee`.
 
@@ -177,6 +180,20 @@ once #12 has a pull request, on a branch stacked on #12's branch.
 | `fix_ci` | `true` | Treat failing CI check runs on the pull request as feedback. |
 | `reaction` | `thumbs_up` | The emoji the bot puts on each review and comment it picks up, so the reviewer sees it is being addressed: `thumbs_up`, `eyes`, `heart`, `rocket`, `hooray`, `laugh`, or `off` for none. Each one gets a single reaction, and a refused reaction does not stop the ticket. |
 
+### Jira
+
+The issues of a Jira project, worked on in `repo`. The [Jira guide](jira.md)
+explains what changes for these tickets.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `url` | required | The Jira server, for example `https://issues.apache.org/jira`. |
+| `project` | required | The project key, for example `CAMEL`. `amaru claim CAMEL-12345` then queues that issue for this project. |
+| `token_env` | `JIRA_TOKEN` | The environment variable with a personal access token. Without one, issues are read anonymously and nothing is posted. |
+| `user` | none | Sign in with this user name and the token as its password, instead of sending the token as a bearer token. |
+| `jql` | none | A JQL condition: matching open issues are picked up by `amaru serve`, as are those matching `intake.labels` or `intake.assignee`. |
+| `comment` | `true` | Comment on the issue when work starts, stops or has a pull request. Only with a token. |
+
 ### Workspace
 
 | Key | Default | Meaning |
@@ -189,3 +206,9 @@ The prompts are compiled into the binary. To change one, copy it from
 [`prompts/`](../prompts) into a `prompts/` directory next to the daemon
 file, keeping its file name, and edit it there. Prompts you don't copy keep
 their built-in text.
+
+Templates fill `{{issue}}` (`#42`, or the Jira key), `{{repo}}`, `{{number}}`,
+`{{title}}`, `{{body}}`, `{{branch}}` and `{{base}}`. `implement` also gets
+`{{conventions}}`, the commit message rule of a Jira project, and `continue`
+gets `{{latest}}`: how to read the issue's newest comments, or for a Jira
+issue the comments themselves.

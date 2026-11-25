@@ -1,7 +1,15 @@
 //! Wiring the daemon's parts together from the settings.
 
 use crate::{
-    db::Store, forge::github::GitHub, lifecycle::Services, prompts::Prompts, settings::Settings,
+    db::Store,
+    forge::{
+        Trackers,
+        github::GitHub,
+        jira::{Curl, Jira},
+    },
+    lifecycle::Services,
+    prompts::Prompts,
+    settings::Settings,
     worktree::Workspace,
 };
 use anyhow::Result;
@@ -13,11 +21,19 @@ pub fn services(config: &Path) -> Result<Arc<Services>> {
     let state = settings.state_dir();
     let github = Arc::new(GitHub::new(settings.daemon.gh.clone()));
     let prompts_dir = settings.base_dir.join("prompts");
+    let http = Arc::new(Curl::default());
+    let mut trackers = Trackers::new(github.clone());
+    for project in &settings.projects {
+        if let Some(jira) = &project.jira {
+            let source = Arc::new(Jira::new(jira.clone(), http.clone()));
+            trackers = trackers.with(&project.repo, source);
+        }
+    }
     Ok(Arc::new(Services {
         store: Arc::new(Store::open(&state.join("amaru.db"))?),
         workspace: Workspace::new(&state),
         prompts: Prompts::new(prompts_dir.is_dir().then_some(prompts_dir)),
-        source: github.clone(),
+        source: Arc::new(trackers),
         forge: github,
         settings: Arc::new(settings),
     }))

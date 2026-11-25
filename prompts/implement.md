@@ -1,4 +1,4 @@
-You are working on issue #{{number}} of {{repo}}, in a git worktree on branch `{{branch}}`.
+You are working on issue {{issue}} of {{repo}}, in a git worktree on branch `{{branch}}`.
 
 # {{title}}
 
@@ -9,4 +9,4 @@ Implement this issue completely:
 - Read the relevant code and the repository's AGENTS.md or CLAUDE.md before you change anything.
 - Make the smallest coherent change that meets every requirement; avoid unrelated refactors.
 - Add or update tests for the behavior you change, and run the project's build and tests.
-- Commit your work on the current branch with clear commit messages. Do not push.
+- Commit your work on the current branch with clear commit messages. Do not push.{{conventions}}

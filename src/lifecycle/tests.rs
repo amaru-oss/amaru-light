@@ -36,6 +36,26 @@ async fn takes_an_issue_to_a_pull_request_in_one_session() {
 }
 
 #[tokio::test]
+async fn names_a_jira_ticket_by_its_key() {
+    let fake = Fake::jira().await;
+    fake.forge.update_issue(1, |i| i.key = Some("APP-1".into()));
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert_eq!(ticket.reference(), "APP-1");
+    assert!(fake.upstream_has("amaru/APP-1-add-a-feature").await);
+    let prompts = fake.prompts();
+    assert!(prompts[0].contains("issue APP-1 of me/app"));
+    assert!(prompts[0].contains("commit message with `APP-1: `"));
+    let forge = fake.forge.state();
+    assert_eq!(forge.prs[0].title, "APP-1: Add a feature");
+    assert!(
+        forge.prs[0]
+            .body
+            .starts_with("Fixes [APP-1](https://jira.example.com/browse/APP-1)")
+    );
+}
+
+#[tokio::test]
 async fn fixes_failing_checks_in_the_same_session() {
     let fake = Fake::new("test -f fixed.txt").await;
     let ticket = drive(&fake, fake.claim(1).await).await;

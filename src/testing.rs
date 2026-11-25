@@ -240,7 +240,7 @@ async fn seed(root: &Path) -> PathBuf {
     seed
 }
 
-fn write_settings(root: &Path, check: &str) -> PathBuf {
+fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
     let agent = root.join("agent/claude");
     std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
     std::fs::write(&agent, AGENT).unwrap();
@@ -251,7 +251,7 @@ fn write_settings(root: &Path, check: &str) -> PathBuf {
         format!("checks:\n  - {{name: check, run: \"{check}\"}}\n")
     };
     std::fs::write(root.join("project.yaml"), format!(
-        "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}"
+        "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}{extra}"
     )).unwrap();
     let daemon = format!(
         "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
@@ -263,9 +263,23 @@ fn write_settings(root: &Path, check: &str) -> PathBuf {
 
 impl Fake {
     pub async fn new(check: &str) -> Self {
+        Self::with_project(check, "").await
+    }
+
+    /// A project whose tickets come from the Jira project `APP`; the fake
+    /// forge still answers for its issues.
+    pub async fn jira() -> Self {
+        Self::with_project(
+            "",
+            "jira: {url: \"https://jira.example.com\", project: APP}\n",
+        )
+        .await
+    }
+
+    async fn with_project(check: &str, extra: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         upstream(dir.path()).await;
-        let settings = Settings::load(&write_settings(dir.path(), check)).unwrap();
+        let settings = Settings::load(&write_settings(dir.path(), check, extra)).unwrap();
         let forge = Arc::new(FakeForge::default());
         let url_base = format!("file://{}/remotes/", dir.path().display());
         let svc = Arc::new(Services {

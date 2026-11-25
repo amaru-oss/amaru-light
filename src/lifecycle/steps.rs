@@ -20,9 +20,11 @@ impl Job<'_> {
         }
         self.ticket.title = issue.title;
         self.ticket.body = issue.body;
+        self.ticket.key = issue.key;
         self.ticket.branch = Some(format!(
-            "{}{number}-{}",
+            "{}{}-{}",
             self.project.branch_prefix,
+            self.ticket.label(),
             slug(&self.ticket.title)
         ));
         self.choose_base(&issue.blocked_by)?;
@@ -47,7 +49,8 @@ impl Job<'_> {
                 Some(_) => {}
                 None => {
                     return Err(blocked(format!(
-                        "waiting for #{dependency}, which this issue depends on"
+                        "waiting for {}, which this issue depends on",
+                        self.project.issue_name(dependency)
                     )));
                 }
             }
@@ -89,8 +92,11 @@ impl Job<'_> {
     }
 
     pub(super) async fn implement(&mut self) -> Result<State> {
-        let vars = self.issue_vars();
         let resumed = self.ticket.session_id.is_some() && self.ticket.summary.is_some();
+        if resumed {
+            self.refresh_jira_body().await?;
+        }
+        let vars = self.issue_vars();
         let name = if resumed { "continue" } else { "implement" };
         let mut vars = vars;
         vars.push((
@@ -114,6 +120,15 @@ impl Job<'_> {
             return Err(blocked("the agent finished without committing any change"));
         }
         Ok(next)
+    }
+
+    /// The agent cannot read Jira itself: give it the latest comments.
+    async fn refresh_jira_body(&mut self) -> Result<()> {
+        if self.ticket.key.is_some() {
+            let (repo, number) = (self.ticket.repo.clone(), self.ticket.number);
+            self.ticket.body = self.svc.source.issue(&repo, number).await?.body;
+        }
+        Ok(())
     }
 
     async fn commit_leftovers(&self, message: &str) -> Result<()> {
@@ -251,17 +266,45 @@ impl Job<'_> {
         Ok(NewPullRequest {
             branch: branch.to_owned(),
             base: base.unwrap_or_else(|| self.project.base_branch.clone()),
-            title: t.title.clone(),
+            title: self.pr_title(),
             body: self.pr_body(&log),
         })
     }
 
+    /// The issue title; a Jira ticket's starts with its key, as projects such
+    /// as Apache Camel require.
+    fn pr_title(&self) -> String {
+        let t = &self.ticket;
+        match &t.key {
+            Some(key) if !t.title.starts_with(key.as_str()) => format!("{key}: {}", t.title),
+            _ => t.title.clone(),
+        }
+    }
+
+    /// How the pull request names its issue: `#42`, or a link to Jira.
+    fn issue_link(&self, number: u64) -> String {
+        match &self.project.jira {
+            Some(jira) => format!("[{}]({})", jira.key(number), jira.browse_url(number)),
+            None => format!("#{number}"),
+        }
+    }
+
     fn pr_body(&self, log: &str) -> String {
         let t = &self.ticket;
-        let link = if t.complete { "Closes" } else { "Part of" };
+        let jira = self.project.jira.is_some();
+        let link = match (t.complete, jira) {
+            (true, false) => "Closes",
+            (true, true) => "Fixes",
+            (false, _) => "Part of",
+        };
         let stacked = t
             .stacked_on
-            .map(|n| format!("\n\nThis builds on the work for #{n}, which is not merged yet."))
+            .map(|n| {
+                format!(
+                    "\n\nThis builds on the work for {}, which is not merged yet.",
+                    self.issue_link(n)
+                )
+            })
             .unwrap_or_default();
         let checks: Vec<String> = self
             .project
@@ -271,8 +314,8 @@ impl Job<'_> {
             .collect();
         let summary = t.summary.clone().unwrap_or_default();
         format!(
-            "{link} #{}{stacked}\n\n## Summary\n{summary}\n\n## Commits\n{log}\n## Verification\n{}\n\n_Opened by Amaru Light._",
-            t.number,
+            "{link} {}{stacked}\n\n## Summary\n{summary}\n\n## Commits\n{log}\n## Verification\n{}\n\n_Opened by Amaru Light._",
+            self.issue_link(t.number),
             checks.join("\n"),
         )
     }

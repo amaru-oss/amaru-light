@@ -310,6 +310,71 @@ const fn default_keep_blocked() -> Retention {
     Retention::For(Duration::from_secs(7 * 86_400))
 }
 
+/// Tickets of a project that live in Jira instead of GitHub issues; pull
+/// requests still go to the GitHub repository.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JiraSettings {
+    /// The Jira server, for example `https://issues.apache.org/jira`.
+    pub url: String,
+    /// The Jira project key, for example `CAMEL`.
+    pub project: String,
+    /// The environment variable holding a personal access token. Reading
+    /// public issues needs none; commenting does.
+    #[serde(default = "default_jira_token_env")]
+    pub token_env: String,
+    /// Sign in with this user name and the token as its password instead of
+    /// sending the token as a bearer token.
+    #[serde(default)]
+    pub user: Option<String>,
+    /// Extra issues `amaru serve` picks up, as a JQL condition, for example
+    /// `assignee = currentUser() AND labels = amaru`.
+    #[serde(default)]
+    pub jql: Option<String>,
+    /// Comment on the Jira issue when work starts, stops or has a pull
+    /// request. Needs the token.
+    #[serde(default = "yes")]
+    pub comment: bool,
+}
+
+impl JiraSettings {
+    /// The token from the environment, when one is set.
+    pub fn token(&self) -> Option<String> {
+        std::env::var(&self.token_env)
+            .ok()
+            .filter(|t| !t.trim().is_empty())
+    }
+
+    /// The Jira key of an issue number, for example `CAMEL-12345`.
+    pub fn key(&self, number: u64) -> String {
+        format!("{}-{number}", self.project)
+    }
+
+    pub fn browse_url(&self, number: u64) -> String {
+        format!(
+            "{}/browse/{}",
+            self.url.trim_end_matches('/'),
+            self.key(number)
+        )
+    }
+
+    /// The issue number of a key of this project, `CAMEL-12345` or its
+    /// browse URL.
+    pub fn parse(&self, text: &str) -> Option<u64> {
+        let text = text.trim().trim_end_matches('/');
+        let key = text.rsplit('/').next().unwrap_or(text);
+        let (project, number) = key.rsplit_once('-')?;
+        if !project.eq_ignore_ascii_case(&self.project) {
+            return None;
+        }
+        number.parse().ok()
+    }
+}
+
+fn default_jira_token_env() -> String {
+    "JIRA_TOKEN".into()
+}
+
 /// Settings for one repository.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -323,6 +388,9 @@ pub struct ProjectSettings {
     pub fork: Option<String>,
     #[serde(default = "default_prefix")]
     pub branch_prefix: String,
+    /// Take this project's tickets from Jira instead of GitHub issues.
+    #[serde(default)]
+    pub jira: Option<JiraSettings>,
     #[serde(default)]
     pub intake: IntakeSettings,
     /// Name of the agent in the daemon file.
@@ -337,6 +405,24 @@ pub struct ProjectSettings {
     pub review: ReviewSettings,
     #[serde(default)]
     pub workspace: WorkspaceSettings,
+}
+
+impl ProjectSettings {
+    /// How people name an issue: `CAMEL-12345` or `owner/name#42`.
+    pub fn issue_name(&self, number: u64) -> String {
+        match &self.jira {
+            Some(jira) => jira.key(number),
+            None => format!("{}#{number}", self.repo),
+        }
+    }
+
+    /// The issue's web page.
+    pub fn issue_url(&self, number: u64) -> String {
+        match &self.jira {
+            Some(jira) => jira.browse_url(number),
+            None => format!("https://github.com/{}/issues/{number}", self.repo),
+        }
+    }
 }
 
 fn default_base() -> String {
@@ -410,6 +496,14 @@ impl Settings {
             .find(|p| p.repo.eq_ignore_ascii_case(repo))
     }
 
+    /// The project and issue number of a Jira key or browse URL.
+    pub fn jira_issue(&self, text: &str) -> Option<(&ProjectSettings, u64)> {
+        self.projects.iter().find_map(|p| {
+            let number = p.jira.as_ref()?.parse(text)?;
+            Some((p, number))
+        })
+    }
+
     pub fn agent(&self, name: &str) -> Result<&AgentSettings> {
         self.daemon
             .agents
@@ -453,6 +547,17 @@ impl Settings {
         if project.review.self_review == SelfReview::OtherAgent {
             let reviewer = project.review.reviewer_agent.as_deref();
             self.agent(reviewer.context("review.reviewer_agent is required for other_agent")?)?;
+        }
+        if let Some(jira) = &project.jira {
+            let key = &jira.project;
+            if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                bail!("{repo}: jira.project '{key}' must be a Jira project key");
+            }
+            if !jira.url.starts_with("https://") && !jira.url.starts_with("http://") {
+                bail!("{repo}: jira.url must be an http(s) URL");
+            }
+            // A Jira project may be claimed by hand only.
+            return Ok(());
         }
         if project.intake.labels.is_empty() && project.intake.assignee.is_none() {
             bail!("{repo}: intake needs labels, an assignee, or both");
@@ -528,6 +633,33 @@ mod tests {
             .is_err()
         );
         assert!(load(DAEMON, "repo: me/demo\nagent: claude\n").is_err());
+    }
+
+    #[test]
+    fn reads_jira_projects() {
+        let jira = "repo: apache/camel\nagent: claude\njira:\n  url: https://issues.apache.org/jira/\n  project: CAMEL\n";
+        let settings = load(DAEMON, jira).unwrap();
+        let project = settings.project("apache/camel").unwrap();
+        let config = project.jira.as_ref().unwrap();
+        assert_eq!(config.token_env, "JIRA_TOKEN");
+        assert!(config.comment);
+        assert_eq!(project.issue_name(12_345), "CAMEL-12345");
+        assert_eq!(
+            project.issue_url(7),
+            "https://issues.apache.org/jira/browse/CAMEL-7"
+        );
+        for text in [
+            "CAMEL-12345",
+            " camel-12345 ",
+            "https://issues.apache.org/jira/browse/CAMEL-12345",
+        ] {
+            let (found, number) = settings.jira_issue(text).unwrap();
+            assert_eq!((found.repo.as_str(), number), ("apache/camel", 12_345));
+        }
+        assert!(settings.jira_issue("KAFKA-1").is_none());
+        assert!(settings.jira_issue("CAMEL-x").is_none());
+        let bad = jira.replace("CAMEL", "CAMEL KAFKA");
+        assert!(load(DAEMON, &bad).is_err());
     }
 
     #[test]

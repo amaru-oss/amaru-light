@@ -3,6 +3,7 @@
 use crate::{
     app::parse_issue,
     lifecycle::{BLOCKED_LABEL, Services, unblock},
+    settings::ProjectSettings,
     ticket::{Origin, State, Ticket},
 };
 use anyhow::{Context, Result, bail};
@@ -16,26 +17,42 @@ pub enum Claimed {
     Exists(Ticket),
 }
 
-/// Queue an issue, `owner/name#42`, as a manual ticket.
-pub async fn claim(svc: &Services, reference: &str) -> Result<Claimed> {
-    let (repo, number) =
-        parse_issue(reference.trim()).context("expected an issue as owner/name#number")?;
+/// Find the project and number of `owner/name#42`, a GitHub issue URL, or a
+/// Jira key such as `CAMEL-12345` or its URL.
+fn resolve<'a>(svc: &'a Services, reference: &str) -> Result<(&'a ProjectSettings, u64)> {
+    let reference = reference.trim();
+    if let Some(found) = svc.settings.jira_issue(reference) {
+        return Ok(found);
+    }
+    let (repo, number) = parse_issue(reference)
+        .context("expected an issue as owner/name#number, or a Jira key such as CAMEL-12345")?;
     let project = svc
         .settings
         .project(&repo)
         .with_context(|| format!("{repo} is not a configured project"))?;
+    if let Some(jira) = &project.jira {
+        bail!(
+            "{repo} takes its tickets from Jira: claim {} instead",
+            jira.key(number)
+        );
+    }
+    Ok((project, number))
+}
+
+/// Queue an issue as a manual ticket: `owner/name#42`, its URL, or a Jira
+/// key such as `CAMEL-12345`.
+pub async fn claim(svc: &Services, reference: &str) -> Result<Claimed> {
+    let (project, number) = resolve(svc, reference)?;
     let repo = project.repo.clone();
+    let name = project.issue_name(number);
     if let Some(existing) = svc.store.open_ticket(&repo, number)? {
         return Ok(Claimed::Exists(existing));
     }
     let issue = svc.source.issue(&repo, number).await?;
     if !issue.open {
-        bail!("{repo}#{number} is closed");
+        bail!("{name} is closed");
     }
-    match svc
-        .store
-        .claim(&repo, number, &issue.title, Origin::Manual)?
-    {
+    match svc.store.claim_issue(&repo, &issue, Origin::Manual)? {
         Some(ticket) => Ok(Claimed::Queued(ticket)),
         None => {
             let existing = svc.store.open_ticket(&repo, number)?;
@@ -105,6 +122,27 @@ mod tests {
             State::Cancelled
         );
         assert!(cancel(&fake.svc, ticket.id).is_err());
+    }
+
+    #[tokio::test]
+    async fn claims_a_jira_key() {
+        let fake = Fake::jira().await;
+        fake.forge
+            .update_issue(12, |i| i.key = Some("APP-12".into()));
+        let Claimed::Queued(ticket) = claim(&fake.svc, "https://jira.example.com/browse/APP-12")
+            .await
+            .unwrap()
+        else {
+            unreachable!("a new issue is queued")
+        };
+        assert_eq!((ticket.repo.as_str(), ticket.number), ("me/app", 12));
+        assert_eq!(ticket.reference(), "APP-12");
+        assert!(matches!(
+            claim(&fake.svc, "app-12").await.unwrap(),
+            Claimed::Exists(_)
+        ));
+        let err = claim(&fake.svc, "me/app#12").await.unwrap_err();
+        assert!(format!("{err:#}").contains("claim APP-12 instead"));
     }
 
     #[tokio::test]
