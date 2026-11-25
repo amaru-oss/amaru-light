@@ -8,6 +8,14 @@ review feedback and CI until you merge it. It never merges.
 It is built for one person on a laptop, a home server or a cloud VM, not for a
 team. The design and the reasons behind it are in [docs/design.md](docs/design.md).
 
+| Guide | For |
+| --- | --- |
+| [Configuration reference](docs/configuration.md) | Every key of the daemon and project files, with defaults. |
+| [GitHub access](docs/github-access.md) | The bot account, its token, fork or direct pushes, and what works without write access. |
+| [Build a project container](docs/building-project-containers.md) | A derived image with your agent CLI and toolchain. |
+| [Troubleshooting](docs/troubleshooting.md) | Following a ticket, and the errors you are likely to meet first. |
+| [Migrating from v1](docs/migrating-from-v1.md) | Converting v1 settings, commands and containers. |
+
 ## How it works
 
 ```
@@ -73,12 +81,18 @@ from a fork targets the base branch, because GitHub cannot open a pull
 request against a branch of the fork; its body names the pull request it
 builds on.
 
+A bot that pushes to a fork usually cannot label the upstream issues. The
+daemon then works without the labels, and you unblock a ticket with
+`amaru unblock <ticket>`. See [GitHub access](docs/github-access.md).
+
 ## Requirements
 
 - Git and the GitHub CLI (`gh`).
 - A GitHub token for the bot account in `GH_TOKEN`. A separate bot account
   keeps its comments and pull requests apart from yours. Run
-  `gh auth setup-git` once so Git pushes with that token.
+  `gh auth setup-git` once so Git pushes with that token. Which token to
+  create depends on direct or fork pushes; see
+  [GitHub access](docs/github-access.md#the-token).
 - At least one agent CLI, signed in: `claude` or `codex`. The agent runs
   unattended in its worktree, so it must be allowed to run the project's
   build and tests without asking.
@@ -90,7 +104,8 @@ builds on.
 make install                     # target/release/amaru
 mkdir -p ~/amaru && cp examples/*.yaml ~/amaru/
 mv ~/amaru/daemon.yaml ~/amaru/amaru.yaml
-# Edit ~/amaru/project.yaml: repo, intake, checks, review.
+# Edit ~/amaru/amaru.yaml: the agent (Claude Code or Codex).
+# Edit ~/amaru/project.yaml: repo, fork, intake, agent, checks, review.
 export GH_TOKEN=...              # the bot account's token
 target/release/amaru -c ~/amaru/amaru.yaml doctor
 target/release/amaru -c ~/amaru/amaru.yaml serve
@@ -99,15 +114,24 @@ target/release/amaru -c ~/amaru/amaru.yaml serve
 Other commands:
 
 ```sh
+amaru -c amaru.yaml claim 'owner/name#42'          # queue one issue
+amaru -c amaru.yaml drain owner/name --milestone "v1.2"
 amaru -c amaru.yaml status              # recent tickets
 amaru -c amaru.yaml status --ticket 7   # one ticket's events
 amaru -c amaru.yaml unblock 7
 amaru -c amaru.yaml cancel 7
 ```
 
+Ticket IDs (`7` above) are the daemon's own numbers from `amaru status`, not
+issue numbers. Quote issue references in zsh, where `#` can be a glob
+character. Run one daemon per state directory: stop `serve` before a
+`drain`.
+
 ## Configuration
 
-Two kinds of YAML files, both checked strictly (an unknown key is an error):
+Two kinds of YAML files, both checked strictly (an unknown key is an error,
+so a v1 configuration does not load; see
+[Migrating from v1](docs/migrating-from-v1.md)):
 
 - [`examples/daemon.yaml`](examples/daemon.yaml): machine-wide settings. The
   state directory, poll interval, parallel tickets (1 or 2), the agent CLIs
@@ -119,6 +143,8 @@ Two kinds of YAML files, both checked strictly (an unknown key is an error):
 
 The state directory holds `amaru.db` (tickets and their event log) and
 `repos/<owner>/<name>/`, a mirror clone with one worktree per ticket.
+
+Every key is described in the [configuration reference](docs/configuration.md).
 
 The prompts are in [`prompts/`](prompts) and compiled into the binary. To
 change one, put a file with the same name in a `prompts/` directory next to
