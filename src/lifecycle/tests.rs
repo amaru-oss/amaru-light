@@ -202,7 +202,7 @@ async fn a_silent_agent_is_stopped_and_retried_in_its_session() {
     let ticket = fake.claim(1).await;
     let mut job = Job::new(&fake.svc, ticket, None).unwrap();
     let error = job.drive().await.unwrap_err();
-    assert!(format!("{error:#}").contains("printed nothing for 1s"));
+    assert!(format!("{error:#}").contains("made no progress for 1s"));
     let id = job.into_ticket().id;
     let stored = fake.svc.store.get(id).unwrap().unwrap();
     assert_eq!(stored.state, State::Implementing);

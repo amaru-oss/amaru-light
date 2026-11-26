@@ -178,6 +178,21 @@ pub async fn run(
     cancel: Option<Cancel>,
     on_line: &mut (dyn FnMut(&str) + Send),
 ) -> Result<Output> {
+    run_watched(spec, cancel, &mut |line| {
+        on_line(line);
+        true
+    })
+    .await
+}
+
+/// Like [`run`], but `on_line` tells whether a line shows progress. Only those
+/// count for `Spec::idle`: a CLI that keeps printing that it is reconnecting
+/// is still stuck.
+pub async fn run_watched(
+    spec: &Spec,
+    cancel: Option<Cancel>,
+    on_line: &mut (dyn FnMut(&str) -> bool + Send),
+) -> Result<Output> {
     let mut child = spawn(spec).await?;
     let (stdout, feeder, mut errors) =
         start_io(&mut child, spec.stdin.clone().unwrap_or_default())?;
@@ -204,6 +219,10 @@ const fn exited(ended: &Result<Exit>) -> bool {
     matches!(ended, Ok(Exit::Code(_) | Exit::Signal))
 }
 
+fn millis_since(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 /// Pass on stdout until the process exits, times out, falls silent or is
 /// cancelled.
 async fn watch_child(
@@ -211,14 +230,14 @@ async fn watch_child(
     stdout: ChildStdout,
     spec: &Spec,
     cancel: Option<Cancel>,
-    on_line: &mut (dyn FnMut(&str) + Send),
+    on_line: &mut (dyn FnMut(&str) -> bool + Send),
 ) -> Result<Exit> {
     let start = Instant::now();
     let last = AtomicU64::new(0);
     let mut seen = |line: &str| {
-        let now = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        last.store(now, Ordering::Relaxed);
-        on_line(line);
+        if on_line(line) {
+            last.store(millis_since(start), Ordering::Relaxed);
+        }
     };
     let mut pumping = Box::pin(pump(stdout, &mut seen));
     let mut deadline = Box::pin(tokio::time::sleep(spec.timeout));
@@ -409,6 +428,16 @@ mod tests {
             ..sh("for i in 1 2 3 4 5 6; do echo $i; sleep 0.1; done", 20_000)
         };
         assert!(run(&chatty, None, &mut |_| {}).await.unwrap().success());
+    }
+
+    #[tokio::test]
+    async fn lines_that_show_no_progress_do_not_keep_a_process_alive() {
+        let retrying = Spec {
+            idle: Some(Duration::from_millis(300)),
+            ..sh("while true; do echo retrying; sleep 0.05; done", 20_000)
+        };
+        let out = run_watched(&retrying, None, &mut |_| false).await.unwrap();
+        assert_eq!(out.exit, Exit::Stalled);
     }
 
     #[test]

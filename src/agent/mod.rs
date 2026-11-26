@@ -28,6 +28,8 @@ pub enum AgentEvent {
     Session(String),
     Text(String),
     Tool(String),
+    /// The CLI is retrying, for example reconnecting to the model. Not progress.
+    Retry(String),
     Finished,
 }
 
@@ -44,6 +46,8 @@ pub struct TurnResult {
     /// How the process ended; `None` until it has.
     pub exit: Option<Exit>,
     pub stderr: String,
+    /// The latest retry notice, such as `Reconnecting... waiting for network`.
+    pub retry: Option<String>,
 }
 
 impl TurnResult {
@@ -114,10 +118,12 @@ impl Agent {
             session_id: turn.session.map(str::to_owned),
             ..TurnResult::default()
         };
-        let output = process::run(&spec, place.cancel, &mut |line| {
-            if let Some(event) = self.driver.parse(line, &mut result) {
-                on_event(&event);
+        let output = process::run_watched(&spec, place.cancel, &mut |line| {
+            let event = self.driver.parse(line, &mut result);
+            if let Some(event) = &event {
+                on_event(event);
             }
+            !matches!(event, Some(AgentEvent::Retry(_)))
         })
         .await?;
         result.exit = Some(output.exit);

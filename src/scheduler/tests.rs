@@ -94,7 +94,7 @@ async fn a_milestone_drain_stops_when_nothing_is_left() {
     };
     let scheduler = scheduler(&fake, intake);
     let (_stop, stop_rx) = watch::channel(false);
-    let run = tokio::time::timeout(Duration::from_secs(30), scheduler.run(stop_rx));
+    let run = tokio::time::timeout(Duration::from_secs(30), Box::pin(scheduler.run(stop_rx)));
     run.await.unwrap().unwrap();
     assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
 }

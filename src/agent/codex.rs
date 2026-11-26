@@ -6,12 +6,23 @@ use serde_json::Value;
 
 pub struct Codex;
 
+fn is_retry(message: &Value) -> bool {
+    message["message"]
+        .as_str()
+        .is_some_and(|m| m.starts_with("Reconnecting"))
+}
+
 fn item_event(item: &Value, result: &mut TurnResult) -> Option<AgentEvent> {
     match item["type"].as_str()? {
         "agent_message" => {
             let text = item["text"].as_str()?.to_owned();
             result.text.clone_from(&text);
             Some(AgentEvent::Text(text))
+        }
+        "error" => {
+            let notice = item["message"].as_str()?.to_owned();
+            result.retry = Some(notice.clone());
+            Some(AgentEvent::Retry(notice))
         }
         "command_execution" => item["command"]
             .as_str()
@@ -45,6 +56,12 @@ impl Driver for Codex {
             }
             "item.completed" => item_event(&message["item"], result),
             "turn.completed" => Some(AgentEvent::Finished),
+            // Codex reports its reconnects as errors; the turn goes on.
+            "error" if is_retry(&message) => {
+                let notice = message["message"].as_str().unwrap_or_default().to_owned();
+                result.retry = Some(notice.clone());
+                Some(AgentEvent::Retry(notice))
+            }
             "turn.failed" | "error" => {
                 result.is_error = true;
                 Some(AgentEvent::Finished)
@@ -90,5 +107,30 @@ mod tests {
         assert_eq!(result.session_id.as_deref(), Some("t1"));
         assert_eq!(result.text, "done");
         assert!(!result.is_error);
+    }
+
+    #[test]
+    fn a_reconnect_is_a_retry_not_a_failure() {
+        let mut result = TurnResult::default();
+        let notice = r#"{"type":"error","message":"Reconnecting... waiting for network (Connection failed)"}"#;
+        assert_eq!(
+            Codex.parse(notice, &mut result),
+            Some(AgentEvent::Retry(
+                "Reconnecting... waiting for network (Connection failed)".into()
+            ))
+        );
+        let fallback = r#"{"type":"item.completed","item":{"type":"error","message":"Falling back to HTTPS"}}"#;
+        assert!(matches!(
+            Codex.parse(fallback, &mut result),
+            Some(AgentEvent::Retry(_))
+        ));
+        Codex.parse(r#"{"type":"turn.completed","usage":{}}"#, &mut result);
+        assert!(!result.is_error);
+        assert_eq!(result.retry.as_deref(), Some("Falling back to HTTPS"));
+        Codex.parse(
+            r#"{"type":"error","message":"quota exceeded"}"#,
+            &mut result,
+        );
+        assert!(result.is_error);
     }
 }

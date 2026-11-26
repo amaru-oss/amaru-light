@@ -105,7 +105,7 @@ async fn run(svc: Arc<Services>, intake: Intake, web: bool) -> Result<()> {
             let _ = ctrl_c.send(true);
         }
     });
-    let result = Arc::new(Scheduler::new(svc, intake)).run(stop_rx).await;
+    let result = Box::pin(Arc::new(Scheduler::new(svc, intake)).run(stop_rx)).await;
     let _ = stop.send(true);
     if let Some(server) = server {
         // The server ends with the stop signal; a panic in it is not ours.
