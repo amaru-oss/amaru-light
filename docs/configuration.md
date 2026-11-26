@@ -201,7 +201,7 @@ explains what changes for these tickets.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `keep_blocked` | `7d` | How long the worktree of a blocked ticket is kept: a duration, `0` or `forever`. The branch is kept either way. Unblocking recreates the worktree from it. |
+| `keep_blocked` | `7d` | How long the worktree of a blocked ticket is kept: a duration, `0` or `forever`. The branch is kept either way. Unblocking recreates the worktree from it. Worktrees of done and cancelled tickets are always deleted on the next poll; see `amaru clean`. |
 
 ## Prompts
 

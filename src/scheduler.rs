@@ -93,7 +93,8 @@ impl Scheduler {
         }
     }
 
-    /// One round: claim new work, update tickets, start what can run.
+    /// One round: claim new work, update tickets, start what can run, and
+    /// delete the worktrees of tickets that are finished.
     pub async fn tick(self: &Arc<Self>) -> Result<()> {
         self.claim_new().await?;
         for ticket in self.svc.store.unfinished()? {
@@ -101,7 +102,32 @@ impl Scheduler {
                 log(&format!("ticket update failed: {e:#}"));
             }
         }
-        self.dispatch()
+        self.dispatch()?;
+        if let Err(e) = self.sweep().await {
+            log(&format!("worktree cleanup failed: {e:#}"));
+        }
+        Ok(())
+    }
+
+    /// Delete the worktrees no unfinished ticket uses, build output and all.
+    /// The first poll after a start also catches what older versions left.
+    async fn sweep(&self) -> Result<()> {
+        let running = lock(&self.running)?.keys().copied().collect();
+        let options = crate::cleanup::Sweep {
+            running,
+            ..Default::default()
+        };
+        for gone in crate::cleanup::sweep(&self.svc, &options).await? {
+            let path = gone.path.display();
+            match gone.error {
+                Some(e) => log(&format!("cannot remove the worktree {path}: {e}")),
+                None => log(&format!(
+                    "removed the worktree {path} ({})",
+                    crate::cleanup::human(gone.bytes)
+                )),
+            }
+        }
+        Ok(())
     }
 
     fn is_running(&self, id: i64) -> Result<bool> {

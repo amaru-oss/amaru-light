@@ -40,7 +40,7 @@ fn lists_commands() {
     let (ok, text) = amaru(dir.path(), &["--help"]);
     assert!(ok);
     for command in [
-        "serve", "claim", "drain", "status", "unblock", "guide", "cancel", "doctor",
+        "serve", "claim", "drain", "status", "unblock", "guide", "cancel", "clean", "doctor",
     ] {
         assert!(text.contains(command), "{command}");
     }
@@ -74,4 +74,21 @@ fn rejects_invalid_settings() {
     .unwrap();
     let (ok, text) = amaru(dir.path(), &["status"]);
     assert!(!ok && text.contains("unknown field"), "{text}");
+}
+
+#[test]
+fn cleans_worktrees_no_ticket_uses() {
+    let dir = setup();
+    let old = dir.path().join("data/repos/me/app/worktrees/amaru-1-old");
+    std::fs::create_dir_all(old.join("target")).unwrap();
+    std::fs::write(old.join("target/big"), vec![0u8; 2048]).unwrap();
+    let (ok, text) = amaru(dir.path(), &["clean", "--dry-run"]);
+    assert!(
+        ok && text.contains("would delete 1 worktree(s), 2.0 KB"),
+        "{text}"
+    );
+    assert!(old.exists());
+    let (ok, text) = amaru(dir.path(), &["clean"]);
+    assert!(ok && text.contains("deleted 1 worktree(s)"), "{text}");
+    assert!(!old.exists());
 }

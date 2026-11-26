@@ -6,6 +6,7 @@ pub mod actions;
 pub mod agent;
 pub mod app;
 pub mod checks;
+pub mod cleanup;
 pub mod contract;
 pub mod db;
 pub mod forge;

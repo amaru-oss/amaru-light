@@ -182,3 +182,13 @@ volume instead, Podman still creates an empty volume for `/data`;
 **The settings in the image are out of date.** If the image copies
 `amaru.yaml` and the project file at build time, rebuild it after each
 change, or mount the directory at `/config` instead.
+
+**The disk fills up.** Worktrees and their build output are the usual
+cause. The daemon deletes the worktree of a ticket that is done or
+cancelled on its next poll, and any worktree no unfinished ticket uses on
+every poll, so a restart on a new version also removes what older versions
+left. Blocked tickets keep theirs for `workspace.keep_blocked` (7 days by
+default; lower it, or set `0`). To free space at once, in the container:
+`/app/bin/amaru --config /config/amaru.yaml clean --dry-run`, then without
+`--dry-run`; add `--blocked` to also delete the worktrees of blocked
+tickets. Their branches stay, and unblocking recreates the worktree.

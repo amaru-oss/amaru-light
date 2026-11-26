@@ -355,6 +355,13 @@ impl Fake {
             .unwrap()
     }
 
+    /// Run a ticket until it waits for review, a human, or is done.
+    pub async fn drive(&self, ticket: Ticket) -> Ticket {
+        let mut job = crate::lifecycle::Job::new(&self.svc, ticket, None).unwrap();
+        job.drive().await.unwrap();
+        job.into_ticket()
+    }
+
     fn agent_files(&self, prefix: &str) -> Vec<String> {
         (0..)
             .map(|n| self.dir.path().join(format!("agent/{prefix}-{n}")))

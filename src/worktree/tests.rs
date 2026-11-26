@@ -121,6 +121,40 @@ async fn stacks_reuses_and_removes_worktrees() {
     assert_eq!(ws.ahead(&again, "upstream/main").await.unwrap(), 1);
 }
 
+#[tokio::test]
+async fn removes_locked_and_unknown_worktrees_and_nothing_else() {
+    let Fixture {
+        dir: _dir,
+        ws,
+        target,
+    } = fixture().await;
+    let kept = ws
+        .create(&target, "amaru/1-fix", "upstream/main")
+        .await
+        .unwrap();
+    let locked = ws
+        .create(&target, "amaru/2-next", "upstream/main")
+        .await
+        .unwrap();
+    std::fs::create_dir_all(locked.join("target/debug")).unwrap();
+    let path = locked.to_string_lossy().into_owned();
+    run(&ws.mirror("me/app"), &["worktree", "lock", &path]).await;
+    ws.remove("me/app", &locked).await.unwrap();
+    assert!(!locked.exists());
+    // Removing twice is fine.
+    ws.remove("me/app", &locked).await.unwrap();
+    // A directory git does not know.
+    let stray = ws.path_of("me/app", "amaru/9-stray");
+    std::fs::create_dir_all(stray.join("target")).unwrap();
+    assert_eq!(ws.worktrees().unwrap().len(), 2);
+    ws.remove("me/app", &stray).await.unwrap();
+    assert!(!stray.exists());
+    assert_eq!(ws.worktrees().unwrap(), [("me/app".into(), kept)]);
+    assert!(ws.remove("me/app", &ws.mirror("me/app")).await.is_err());
+    let outside = stray.join("../../mirror/x");
+    assert!(ws.remove("me/app", &outside).await.is_err());
+}
+
 async fn url(dir: &Path, args: &[&str]) -> String {
     run(dir, &[&["remote", "get-url"][..], args].concat())
         .await

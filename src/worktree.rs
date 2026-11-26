@@ -190,15 +190,102 @@ impl Workspace {
         Ok((log, stat))
     }
 
+    /// Delete a ticket's worktree with everything in it, build output
+    /// included, and make the clone forget it. The branch stays. A worktree
+    /// that is already gone, or that git no longer knows, is not an error.
     pub async fn remove(&self, repo: &str, worktree: &Path) -> Result<()> {
-        let path = worktree.to_string_lossy().into_owned();
-        git(
-            &self.mirror(repo),
-            &["worktree", "remove", "--force", &path],
-        )
-        .await?;
+        let climbs = worktree
+            .components()
+            .any(|c| c == std::path::Component::ParentDir);
+        if climbs
+            || !worktree.starts_with(&self.root)
+            || worktree.components().count() <= self.depth()
+        {
+            bail!("{} is not a worktree of this daemon", worktree.display());
+        }
+        let mirror = self.mirror(repo);
+        let known = mirror.join(".git").is_dir();
+        if known {
+            let path = worktree.to_string_lossy().into_owned();
+            // Twice --force also removes a locked worktree. When git cannot
+            // remove it (it may not know it), the files go below.
+            let args = ["worktree", "remove", "--force", "--force", &path];
+            let _ = git(&mirror, &args).await;
+        }
+        match tokio::fs::remove_dir_all(worktree).await {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(e).with_context(|| format!("cannot delete {}", worktree.display()));
+            }
+            _ => {}
+        }
+        if known {
+            git(&mirror, &["worktree", "prune"]).await?;
+        }
         Ok(())
     }
+
+    /// Path components of a worktree's parent, `<root>/<owner>/<name>/worktrees`.
+    fn depth(&self) -> usize {
+        self.root.components().count() + 3
+    }
+
+    /// Every worktree directory on disk, with its repository `owner/name`,
+    /// whether a ticket still uses it or not.
+    pub fn worktrees(&self) -> Result<Vec<(String, PathBuf)>> {
+        let mut found = Vec::new();
+        for owner in subdirs(&self.root)? {
+            for name in subdirs(&owner)? {
+                let (Some(o), Some(n)) = (owner.file_name(), name.file_name()) else {
+                    continue;
+                };
+                let repo = format!("{}/{}", o.to_string_lossy(), n.to_string_lossy());
+                for dir in subdirs(&name.join("worktrees"))? {
+                    found.push((repo.clone(), dir));
+                }
+            }
+        }
+        found.sort();
+        Ok(found)
+    }
+
+    /// Where the worktree of `branch` is, used or not.
+    pub fn path_of(&self, repo: &str, branch: &str) -> PathBuf {
+        self.worktree_path(repo, branch)
+    }
+}
+
+/// The directories in `dir`, none when it does not exist.
+fn subdirs(dir: &Path) -> Result<Vec<PathBuf>> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e).with_context(|| format!("cannot list {}", dir.display())),
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        // A symbolic link is never followed: only real directories count.
+        if entry.file_type()?.is_dir() {
+            dirs.push(entry.path());
+        }
+    }
+    Ok(dirs)
+}
+
+/// Bytes the files under `path` take, not following symbolic links.
+pub fn disk_usage(path: &Path) -> u64 {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !meta.is_dir() {
+        return meta.len();
+    }
+    std::fs::read_dir(path).map_or(0, |entries| {
+        entries
+            .filter_map(std::result::Result::ok)
+            .map(|e| disk_usage(&e.path()))
+            .sum()
+    })
 }
 
 /// Check out `branch` at `path`, creating the branch from `base_ref` if it
