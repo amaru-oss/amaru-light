@@ -132,9 +132,16 @@ then `amaru unblock <id>`.
 error, for example a usage limit or an expired login. The reason holds the
 end of its output.
 
-**The log says `the agent printed nothing for 1800s and was stopped`.** The
-agent CLI went quiet for `idle_timeout`, often because its connection to the
-model died, for example after the machine changed networks. The daemon
+**The log says `the agent made no progress for 1800s and was stopped`.** The
+agent CLI printed nothing but retry notices for `idle_timeout`, often because
+it cannot reach the model, for example after the machine changed networks.
+The reason ends with its last notice, such as Codex's `Reconnecting...
+waiting for network`; the log shows each new one as it arrives. Check the
+container's network with
+`podman exec <container> curl -sS -o /dev/null -w "%{http_code}\n" https://chatgpt.com/backend-api/codex`
+(`https://api.openai.com/v1` with an API key; any HTTP code, even 401 or
+404, means the network works) and the login with
+`podman exec <container> codex login status`. The daemon
 resumes the same session on its next poll and blocks the ticket after three
 stalls in a row. If the agent was only running a long build, raise
 `idle_timeout` in the project file.

@@ -23,9 +23,19 @@ fn event_payload(event: &AgentEvent) -> Option<(&'static str, serde_json::Value)
     match event {
         AgentEvent::Session(id) => Some(("AGENT_SESSION", json!({ "session": id }))),
         AgentEvent::Tool(name) => Some(("AGENT_TOOL", json!({ "tool": name }))),
+        AgentEvent::Retry(notice) => Some(("AGENT_RETRY", json!({ "notice": tail(notice, 500) }))),
         AgentEvent::Text(text) => Some(("AGENT_TEXT", json!({ "text": tail(text, 500) }))),
         AgentEvent::Finished => None,
     }
+}
+
+/// What the agent last said about retrying, to explain a turn that never ended.
+fn last_notice(result: &TurnResult) -> String {
+    result
+        .retry
+        .as_deref()
+        .map(|n| format!(" (it last said: {})", one_line(n, 300)))
+        .unwrap_or_default()
 }
 
 /// The first line of `text`, cut to about `limit` bytes, for the log.
@@ -58,22 +68,34 @@ impl Job<'_> {
             idle: Some(self.project.idle_timeout.0).filter(|d| !d.is_zero()),
             cancel: self.cancel.clone(),
         };
-        let (store, id) = (&self.svc.store, self.ticket.id);
         let how = session.map_or_else(|| "new session".to_owned(), |s| format!("session {s}"));
         self.log(&format!("{agent_name} turn started ({how})"));
+        let mut notice = String::new();
         let result = agent
             .run(&Turn { prompt, session }, place, &mut |event| {
-                if let AgentEvent::Tool(tool) = event {
-                    self.log(&format!("{agent_name} runs {}", one_line(tool, 120)));
-                }
-                if let Some((kind, payload)) = event_payload(event) {
-                    // The event log is best effort; the turn result is what counts.
-                    let _ = store.event(id, kind, &payload);
-                }
+                self.note(agent_name, &mut notice, event);
             })
             .await?;
         self.record_turn(agent_name, &result)?;
         Ok(result)
+    }
+
+    /// Log and record one event of a running turn. `notice` is the latest
+    /// retry notice, so that one repeated every few seconds is noted once.
+    fn note(&self, agent: &str, notice: &mut String, event: &AgentEvent) {
+        match event {
+            AgentEvent::Tool(tool) => self.log(&format!("{agent} runs {}", one_line(tool, 120))),
+            AgentEvent::Retry(text) if text == notice => return,
+            AgentEvent::Retry(text) => {
+                self.log(&format!("{agent}: {}", one_line(text, 200)));
+                notice.clone_from(text);
+            }
+            _ => {}
+        }
+        if let Some((kind, payload)) = event_payload(event) {
+            // The event log is best effort; the turn result is what counts.
+            let _ = self.svc.store.event(self.ticket.id, kind, &payload);
+        }
     }
 
     /// Log the end of an agent turn and record it as an event.
@@ -141,15 +163,17 @@ impl Job<'_> {
         match result.exit {
             Some(Exit::Cancelled) => Err(Cancelled.into()),
             Some(Exit::TimedOut) => Err(blocked(format!(
-                "the agent did not finish within {}",
-                self.project.step_timeout
+                "the agent did not finish within {}{}",
+                self.project.step_timeout,
+                last_notice(result)
             ))),
             // Not blocked: the daemon retries in the same session, which is
             // what gets an agent past a dropped connection, and blocks the
             // ticket after a few stalls in a row.
             Some(Exit::Stalled) => Err(anyhow::anyhow!(
-                "the agent printed nothing for {} and was stopped",
-                self.project.idle_timeout
+                "the agent made no progress for {} and was stopped{}",
+                self.project.idle_timeout,
+                last_notice(result)
             )),
             _ if !result.succeeded() => {
                 let detail = if result.text.is_empty() {
