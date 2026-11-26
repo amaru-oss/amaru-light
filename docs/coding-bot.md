@@ -9,8 +9,8 @@ request here. It reviews its own diff first, then acts on reviews from
 
 ## Prerequisites
 
-- The bot account `orp-bot` and its fork of this repository,
-  `orp-bot/amaru-light` (fork it while signed in as the bot).
+- The bot account `orp-bot`. The daemon creates its fork of this
+  repository, `orp-bot/amaru-light`, on the first ticket if it is missing.
 - Its role on `amaru-oss/amaru-light`. With no role the bot still works
   through the fork, but it cannot add the `amaru:working` and
   `amaru:blocked` labels and cannot be assigned issues; blocked tickets then

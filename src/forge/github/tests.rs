@@ -93,3 +93,77 @@ async fn replies_in_line_threads_and_encodes_labels() {
     assert!(log.contains("-f id=PRRC_3"));
     assert_eq!(log.matches("graphql").count(), 1);
 }
+
+/// A fake `gh` for forks: `bot/app` and `org-bot/app` exist once created,
+/// `bot/other` is a fork of something else, `bot/plain` is no fork at all.
+const FORKS: &str = r#"#!/bin/sh
+dir=$(dirname "$0")
+echo "$*" >> "$dir/calls.log"
+fork='{"full_name":"%s","fork":true,"parent":{"full_name":"org/app"},"source":{"full_name":"org/app"}}'
+case "$*" in
+  "api user") echo '{"login":"bot"}' ;;
+  "api -X POST repos/org/app/forks"*"organization=org-bot") touch "$dir/created-org"; printf "$fork" org-bot/app ;;
+  "api -X POST repos/org/app/forks -f name=app"*) touch "$dir/created-bot"; printf "$fork" bot/app ;;
+  "api -X POST repos/org/app/forks -f name=taken") printf "$fork" bot/app ;;
+  "api repos/bot/app") [ -f "$dir/created-bot" ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }; printf "$fork" bot/app ;;
+  "api repos/org-bot/app") [ -f "$dir/created-org" ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }; printf "$fork" org-bot/app ;;
+  "api repos/bot/other") echo '{"full_name":"bot/other","fork":true,"parent":{"full_name":"else/app"}}' ;;
+  "api repos/bot/plain") echo '{"full_name":"bot/plain","fork":false}' ;;
+  "api repos/bot/taken") echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+  "api repos/bot/down") echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1 ;;
+  *) echo '{}' ;;
+esac
+"#;
+
+fn forks(dir: &Path) -> GitHub {
+    let script = dir.join("gh");
+    std::fs::write(&script, FORKS).unwrap();
+    let mode = std::os::unix::fs::PermissionsExt::from_mode(0o755);
+    std::fs::set_permissions(&script, mode).unwrap();
+    GitHub::new(script.to_string_lossy().into_owned())
+        .with_fork_wait(Duration::from_millis(50), Duration::from_millis(10))
+}
+
+fn forked(fork: &str) -> Target {
+    Target {
+        upstream: "org/app".into(),
+        fork: Some(fork.into()),
+    }
+}
+
+#[tokio::test]
+async fn creates_a_missing_fork_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let gh = forks(dir.path());
+    gh.ensure_fork(&forked("bot/app")).await.unwrap();
+    gh.ensure_fork(&forked("bot/app")).await.unwrap();
+    let log = calls(dir.path());
+    assert_eq!(log.matches("/forks").count(), 1, "{log}");
+    assert!(!log.contains("organization="));
+    // A fork owned by an organization is made there.
+    gh.ensure_fork(&forked("org-bot/app")).await.unwrap();
+    assert!(calls(dir.path()).contains("-f name=app -f organization=org-bot"));
+}
+
+#[tokio::test]
+async fn refuses_a_repository_that_is_not_a_fork_of_upstream() {
+    let dir = tempfile::tempdir().unwrap();
+    let gh = forks(dir.path());
+    for (fork, says) in [
+        ("bot/other", "is a fork of else/app"),
+        ("bot/plain", "is not a fork"),
+        ("bot/taken", "set `fork: bot/app`"),
+    ] {
+        let error = gh.ensure_fork(&forked(fork)).await.unwrap_err();
+        assert!(error.is::<ForkError>(), "{fork}: {error:#}");
+        assert!(format!("{error:#}").contains(says), "{fork}: {error:#}");
+    }
+    // Other failures may pass, so they are not a ForkError.
+    let error = gh.ensure_fork(&forked("bot/down")).await.unwrap_err();
+    assert!(!error.is::<ForkError>());
+    let direct = Target {
+        upstream: "org/app".into(),
+        fork: None,
+    };
+    gh.ensure_fork(&direct).await.unwrap();
+}

@@ -1,8 +1,8 @@
 //! GitHub through the `gh` CLI, authenticated by the `GH_TOKEN` of the bot.
 
 use super::{
-    Feedback, FeedbackKind, Forge, Issue, NewPullRequest, PullRequest, Reaction, Selector, Target,
-    TicketSource, body_dependencies,
+    Feedback, FeedbackKind, Forge, ForkError, Issue, NewPullRequest, PullRequest, Reaction,
+    Selector, Target, TicketSource, body_dependencies,
 };
 use crate::process;
 use anyhow::{Context, Result, bail};
@@ -15,6 +15,10 @@ use std::time::Duration;
 pub struct GitHub {
     program: String,
     timeout: Duration,
+    /// How long to wait for a new fork, which GitHub creates in the
+    /// background, and how often to look.
+    fork_wait: Duration,
+    fork_poll: Duration,
 }
 
 fn text(value: &Value) -> String {
@@ -70,6 +74,27 @@ fn feedback(id: String, kind: FeedbackKind, raw: &Value) -> Feedback {
     }
 }
 
+/// Accept `repo` as the fork `fork` only when GitHub says it is a fork of
+/// `upstream`, directly or through another fork.
+fn check_fork(repo: &Value, fork: &str, upstream: &str) -> Result<()> {
+    let is = |key: &str| {
+        repo[key]["full_name"]
+            .as_str()
+            .is_some_and(|n| n.eq_ignore_ascii_case(upstream))
+    };
+    if repo["fork"] == true && (is("parent") || is("source")) {
+        return Ok(());
+    }
+    let what = match repo["parent"]["full_name"].as_str() {
+        Some(parent) => format!("a fork of {parent}"),
+        None => "not a fork".to_owned(),
+    };
+    Err(ForkError(format!(
+        "{fork} exists but is {what}, not a fork of {upstream}; delete or rename it, or set `fork` to the bot's fork of {upstream}"
+    ))
+    .into())
+}
+
 /// Percent-encode a path segment.
 fn encode(segment: &str) -> String {
     segment
@@ -93,6 +118,70 @@ impl GitHub {
         Self {
             program,
             timeout: Duration::from_secs(120),
+            fork_wait: Duration::from_secs(300),
+            fork_poll: Duration::from_secs(5),
+        }
+    }
+
+    #[must_use]
+    pub const fn with_fork_wait(mut self, wait: Duration, poll: Duration) -> Self {
+        self.fork_wait = wait;
+        self.fork_poll = poll;
+        self
+    }
+
+    /// A repository, or `None` when GitHub says it does not exist.
+    async fn repository(&self, repo: &str) -> Result<Option<Value>> {
+        match self.api(&[&format!("repos/{repo}")]).await {
+            Ok(value) => Ok(Some(value)),
+            Err(e) if format!("{e:#}").contains("HTTP 404") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fork `upstream` as `fork`: into the bot's account, or into the
+    /// organization that owns `fork`.
+    async fn create_fork(&self, upstream: &str, fork: &str) -> Result<()> {
+        let (owner, name) = fork.split_once('/').context("fork is not owner/name")?;
+        let me = self.api(&["user"]).await?;
+        let login = text(&me["login"]);
+        let path = format!("repos/{upstream}/forks");
+        let name_field = format!("name={name}");
+        let org_field = format!("organization={owner}");
+        let mut args = vec!["-X", "POST", path.as_str(), "-f", name_field.as_str()];
+        if !owner.eq_ignore_ascii_case(&login) {
+            args.extend(["-f", org_field.as_str()]);
+        }
+        let created = self
+            .api(&args)
+            .await
+            .with_context(|| format!("cannot create the fork {fork} of {upstream}"))?;
+        // GitHub answers with the fork the account already has, under its
+        // own name, instead of making a second one.
+        let full_name = text(&created["full_name"]);
+        if !full_name.eq_ignore_ascii_case(fork) {
+            return Err(ForkError(format!(
+                "GitHub made or kept the fork of {upstream} as {full_name}, not {fork}; set `fork: {full_name}` in the project file"
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Wait until GitHub serves a fork it is still creating.
+    async fn wait_for_fork(&self, fork: &str) -> Result<Value> {
+        let start = tokio::time::Instant::now();
+        loop {
+            if let Some(repo) = self.repository(fork).await? {
+                return Ok(repo);
+            }
+            if start.elapsed() >= self.fork_wait {
+                bail!(
+                    "the fork {fork} was not ready after {}s",
+                    self.fork_wait.as_secs()
+                );
+            }
+            tokio::time::sleep(self.fork_poll).await;
         }
     }
 
@@ -232,6 +321,21 @@ impl TicketSource for GitHub {
 
 #[async_trait]
 impl Forge for GitHub {
+    async fn ensure_fork(&self, target: &Target) -> Result<()> {
+        let Some(fork) = &target.fork else {
+            return Ok(());
+        };
+        let repo = match self.repository(fork).await? {
+            Some(repo) => repo,
+            None => {
+                crate::scheduler::log(&format!("creating the fork {fork} of {}", target.upstream));
+                self.create_fork(&target.upstream, fork).await?;
+                self.wait_for_fork(fork).await?
+            }
+        };
+        check_fork(&repo, fork, &target.upstream)
+    }
+
     async fn find_pr(&self, target: &Target, branch: &str) -> Result<Option<PullRequest>> {
         let path = format!("repos/{}/pulls", target.upstream);
         let head = format!("head={}", target.head(branch));

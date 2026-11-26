@@ -4,7 +4,7 @@
 use crate::{
     db::Store,
     forge::{
-        Feedback, Forge, Issue, NewPullRequest, PullRequest, Reaction, Selector, Target,
+        Feedback, Forge, ForkError, Issue, NewPullRequest, PullRequest, Reaction, Selector, Target,
         TicketSource,
     },
     lifecycle::Services,
@@ -35,6 +35,10 @@ if [ -f "$dir/stall" ]; then
   sleep 30
 fi
 c() { git -c user.name=agent -c user.email=agent@example.com "$@"; }
+if [ -f "$dir/tamper" ]; then
+  git remote set-url origin "file://$dir/nowhere.git"
+  git remote set-url --push upstream "file://$dir/nowhere.git"
+fi
 mkdir -p .amaru
 case "$prompt" in
   *"You are working on issue"*) echo done >> feature.txt; c add feature.txt; c commit -qm feature
@@ -66,10 +70,20 @@ pub struct ForgeState {
     /// Feedback ids reacted to, in order.
     pub reactions: Vec<String>,
     pub merged: bool,
+    /// Refuse the fork, as when it is not a fork of the upstream repository.
+    pub fork_unusable: bool,
     /// Calls the forge refuses, as for a bot without write access.
     pub denied: Denied,
     /// Issues the forge knows; unknown numbers are open, plain issues.
     pub issues: Vec<Issue>,
+    /// Where the bare repositories live, so that a missing fork can be made.
+    pub remotes: Option<PathBuf>,
+    /// Forks made by `ensure_fork`.
+    pub forks_created: Vec<String>,
+    /// Calls to `ensure_fork`.
+    pub fork_checks: usize,
+    /// The `head` of each opened pull request.
+    pub heads: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -177,9 +191,40 @@ impl Forge for FakeForge {
     async fn find_pr(&self, _: &Target, _: &str) -> Result<Option<PullRequest>> {
         Ok(None)
     }
-    async fn open_pr(&self, _: &Target, pr: &NewPullRequest) -> Result<PullRequest> {
+    /// Like GitHub, make the fork as a copy of the upstream repository when
+    /// it is missing.
+    async fn ensure_fork(&self, target: &Target) -> Result<()> {
+        let remotes = {
+            let mut state = self.state();
+            state.fork_checks += 1;
+            if target.fork.is_some() && state.fork_unusable {
+                return Err(ForkError("bot/app exists but is not a fork".into()).into());
+            }
+            state.remotes.clone()
+        };
+        let (Some(fork), Some(remotes)) = (&target.fork, remotes) else {
+            return Ok(());
+        };
+        let dest = remotes.join(format!("{fork}.git"));
+        if !dest.exists() {
+            let source = remotes.join(format!("{}.git", target.upstream));
+            std::fs::create_dir_all(dest.parent().unwrap_or(&remotes))?;
+            let (source, dest) = (source.to_string_lossy(), dest.to_string_lossy());
+            process::capture(
+                "git",
+                &["clone", "-q", "--bare", &source, &dest],
+                &remotes,
+                Duration::from_secs(60),
+            )
+            .await?;
+            self.state().forks_created.push(fork.clone());
+        }
+        Ok(())
+    }
+    async fn open_pr(&self, target: &Target, pr: &NewPullRequest) -> Result<PullRequest> {
         let index = self.state().prs.len();
         self.state().prs.push(pr.clone());
+        self.state().heads.push(target.head(&pr.branch));
         Ok(self.pr_for(index))
     }
     async fn pr(&self, _: &str, number: u64) -> Result<PullRequest> {
@@ -286,6 +331,7 @@ impl Fake {
         upstream(dir.path()).await;
         let settings = Settings::load(&write_settings(dir.path(), check, extra)).unwrap();
         let forge = Arc::new(FakeForge::default());
+        forge.state().remotes = Some(dir.path().join("remotes"));
         let url_base = format!("file://{}/remotes/", dir.path().display());
         let svc = Arc::new(Services {
             store: Arc::new(Store::open(&settings.state_dir().join("amaru.db")).unwrap()),
@@ -324,7 +370,15 @@ impl Fake {
     }
 
     pub async fn upstream_has(&self, branch: &str) -> bool {
-        let bare = self.dir.path().join("remotes/me/app.git");
+        self.repo_has("me/app", branch).await
+    }
+
+    /// Whether the bare repository `owner/name` has `branch`.
+    pub async fn repo_has(&self, repo: &str, branch: &str) -> bool {
+        let bare = self.dir.path().join(format!("remotes/{repo}.git"));
+        if !bare.exists() {
+            return false;
+        }
         let out = process::capture(
             "git",
             &["branch", "--list", branch],

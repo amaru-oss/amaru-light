@@ -17,9 +17,28 @@ Choose one per project:
 
 - **Direct.** Leave `fork` out. The bot pushes branches to `repo` and
   opens pull requests from them. The bot needs write access to `repo`.
-- **Fork.** Set `fork: my-bot/name` to a fork the bot owns. The bot pushes
+- **Fork.** Set `fork: my-bot/name` to the bot's fork. The bot pushes
   branches to the fork and opens pull requests on `repo` from
   `my-bot:branch`. The bot needs no write access to `repo`.
+
+The daemon sets this up itself, never the agent, before it prepares a
+worktree, before every agent turn and before every push:
+
+- With `fork`, it makes sure the fork exists and creates it when it is
+  missing: in the bot's own account, or in the organization named by the
+  fork's owner. A repository with that name that is not a fork of `repo`
+  stops the ticket, as does a fork GitHub keeps under another name (it
+  says which name to set).
+- In the clone and in each worktree, `origin` is where branches are pushed
+  (the fork, or `repo` without one) and `upstream` is `repo`, which ticket
+  branches start from. Anything else, such as a remote URL or push URL the
+  agent changed, is put back. Clones made by earlier versions, with `origin`
+  for `repo` and `fork` for the fork, are renamed to this layout.
+- When the daemon cannot make sure of the fork or the remotes, the ticket
+  stops with the reason before the agent runs. A GitHub error that may pass
+  is retried a few times first.
+
+The agent is told not to push or change the remotes.
 
 With a fork, a pull request for a dependent issue (stacked on another
 ticket's branch) targets the base branch instead of the other branch,
@@ -34,6 +53,7 @@ that pull request's commits until it merges.
 | Read issues and pull requests, clone | Read access (any public repository). |
 | Comment on issues, open pull requests from a fork, reply to review comments, react to reviews and comments | A signed-in account; no role on a public repository. |
 | Push branches | Write access to the repository it pushes to: `repo` (direct) or the fork. |
+| Create its fork when it is missing | A token that can fork: a classic token with `public_repo` (`repo` for a private repository), and, to fork into an organization, the right to create repositories there. |
 | Add and remove the `amaru:working` and `amaru:blocked` labels | Triage or write access to `repo`. |
 | Be assigned issues (`intake.assignee`) | Access to `repo`: GitHub only lets you assign collaborators. |
 

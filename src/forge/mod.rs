@@ -139,8 +139,25 @@ pub trait TicketSource: Send + Sync {
     async fn remove_label(&self, repo: &str, number: u64, label: &str) -> Result<()>;
 }
 
+/// The fork of a target cannot be used, and retrying will not change that:
+/// for example the repository exists but is not a fork of the upstream one.
+#[derive(Debug)]
+pub struct ForkError(pub String);
+
+impl std::fmt::Display for ForkError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ForkError {}
+
 #[async_trait]
 pub trait Forge: Send + Sync {
+    /// Make sure the target's fork exists and is a fork of its upstream
+    /// repository, creating it when it is missing. Does nothing without a
+    /// fork. Safe to call before every step.
+    async fn ensure_fork(&self, target: &Target) -> Result<()>;
     /// The pull request for a branch, open or not.
     async fn find_pr(&self, target: &Target, branch: &str) -> Result<Option<PullRequest>>;
     async fn open_pr(&self, target: &Target, pr: &NewPullRequest) -> Result<PullRequest>;

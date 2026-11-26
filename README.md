@@ -87,6 +87,12 @@ from a fork targets the base branch, because GitHub cannot open a pull
 request against a branch of the fork; its body names the pull request it
 builds on.
 
+The daemon, not the agent, sets this up before every agent turn and push:
+it creates the fork when it is missing, and keeps `origin` = the fork and
+`upstream` = the repository in the clone and every worktree. A fork it
+cannot use stops the ticket before the agent runs. See
+[GitHub access](docs/github-access.md).
+
 A bot that pushes to a fork usually cannot label the upstream issues. The
 daemon then works without the labels, and you unblock a ticket with
 `amaru unblock <ticket>`. See [GitHub access](docs/github-access.md).

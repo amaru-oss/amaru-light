@@ -198,6 +198,7 @@ impl Job<'_> {
         mode: Session,
     ) -> Result<Report> {
         let worktree = self.worktree()?;
+        self.ensure_remotes().await?;
         contract::clear(&worktree)?;
         let first = self.attempt(agent, prompt, mode).await?;
         match contract::read(&worktree) {

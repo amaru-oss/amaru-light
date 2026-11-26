@@ -1,7 +1,10 @@
-//! Repository mirrors and one git worktree per ticket.
+//! Repository mirrors and one git worktree per ticket. Every clone has two
+//! remotes, set by the daemon and never by the agent: `origin`, where branches
+//! are pushed (the bot's fork, or the repository itself), and `upstream`, the
+//! repository pull requests go to and ticket branches start from.
 
 use crate::{forge::Target, process};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::{
     path::{Path, PathBuf},
     time::Duration,
@@ -9,14 +12,13 @@ use std::{
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Where the remote named for pushes lives: `fork` or `origin`.
-const fn push_remote(target: &Target) -> &'static str {
-    if target.fork.is_some() {
-        "fork"
-    } else {
-        "origin"
-    }
-}
+/// The remote branches are pushed to: the bot's fork, or the repository
+/// itself when there is no fork.
+pub const PUSH_REMOTE: &str = "origin";
+/// The remote pull requests go to, which ticket branches start from.
+pub const UPSTREAM_REMOTE: &str = "upstream";
+/// The fork remote of clones made before `origin` was the fork.
+const OLD_FORK_REMOTE: &str = "fork";
 
 /// Mirrors under `<state>/repos/<owner>/<name>/mirror`, worktrees next to them.
 #[derive(Clone, Debug)]
@@ -58,31 +60,85 @@ impl Workspace {
             .join(branch.replace('/', "-"))
     }
 
-    /// Clone the repository if needed, set the fork remote and fetch.
+    /// The remotes every clone and worktree has, and their URLs.
+    fn remotes(&self, target: &Target) -> [(&'static str, String); 2] {
+        [
+            (PUSH_REMOTE, self.url(target.push_repo())),
+            (UPSTREAM_REMOTE, self.url(&target.upstream)),
+        ]
+    }
+
+    /// Clone the repository if needed, set its remotes and fetch upstream.
     pub async fn sync(&self, target: &Target) -> Result<PathBuf> {
         let mirror = self.mirror(&target.upstream);
         if !mirror.join(".git").is_dir() {
             let parent = mirror.parent().context("mirror has no parent")?;
             tokio::fs::create_dir_all(parent).await?;
             let dest = mirror.to_string_lossy().into_owned();
+            let url = self.url(&target.upstream);
             git(
                 parent,
-                &["clone", "--quiet", &self.url(&target.upstream), &dest],
+                &["clone", "--quiet", "--origin", UPSTREAM_REMOTE, &url, &dest],
             )
             .await?;
         }
-        if let Some(fork) = &target.fork {
-            let url = self.url(fork);
-            if git(&mirror, &["remote", "set-url", "fork", &url])
-                .await
-                .is_err()
-            {
-                git(&mirror, &["remote", "add", "fork", &url]).await?;
-            }
-        }
-        git(&mirror, &["fetch", "--quiet", "--prune", "origin"]).await?;
+        self.set_remotes(&mirror, target).await?;
+        git(&mirror, &["fetch", "--quiet", "--prune", UPSTREAM_REMOTE]).await?;
         ensure_identity(&mirror).await?;
         Ok(mirror)
+    }
+
+    /// Make sure the clone, and `worktree` when given, push to `origin` (the
+    /// fork, or the repository without one) and take their base from
+    /// `upstream`, whatever changed them since. Idempotent: it changes
+    /// nothing on a clone that is already right.
+    pub async fn ensure_remotes(&self, target: &Target, worktree: Option<&Path>) -> Result<()> {
+        let mirror = self.mirror(&target.upstream);
+        if self.set_remotes(&mirror, target).await? {
+            // A clone from before `upstream` existed has no upstream refs
+            // for the ticket's base yet.
+            git(&mirror, &["fetch", "--quiet", "--prune", UPSTREAM_REMOTE]).await?;
+        }
+        for dir in std::iter::once(mirror.as_path()).chain(worktree) {
+            for (name, url) in self.remotes(target) {
+                let fetch = remote_url(dir, name, false).await;
+                let push = remote_url(dir, name, true).await;
+                if fetch.as_deref() != Some(url.as_str()) || push.as_deref() != Some(url.as_str()) {
+                    bail!(
+                        "{}: remote {name} is {} (push {}), not {url}",
+                        dir.display(),
+                        fetch.as_deref().unwrap_or("missing"),
+                        push.as_deref().unwrap_or("missing"),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Set `origin` and `upstream` on the clone; true when anything changed.
+    async fn set_remotes(&self, mirror: &Path, target: &Target) -> Result<bool> {
+        let mut changed = migrate_remotes(mirror).await?;
+        for (name, url) in self.remotes(target) {
+            match remote_url(mirror, name, false).await {
+                Some(current) if current == url => {}
+                Some(_) => {
+                    git(mirror, &["remote", "set-url", name, &url]).await?;
+                    changed = true;
+                }
+                None => {
+                    git(mirror, &["remote", "add", name, &url]).await?;
+                    changed = true;
+                }
+            }
+            if remote_url(mirror, name, true).await.as_deref() != Some(url.as_str()) {
+                // A push URL of its own would send pushes elsewhere.
+                let key = format!("remote.{name}.pushurl");
+                let _ = git(mirror, &["config", "--unset-all", &key]).await;
+                changed = true;
+            }
+        }
+        Ok(changed)
     }
 
     /// Create (or reuse after a restart) the worktree for a ticket branch.
@@ -117,13 +173,12 @@ impl Workspace {
         Ok(true)
     }
 
+    /// Push the worktree's HEAD to `branch` on `origin`, after making sure
+    /// `origin` is still the push repository of `target`.
     pub async fn push(&self, worktree: &Path, target: &Target, branch: &str) -> Result<()> {
+        self.ensure_remotes(target, Some(worktree)).await?;
         let refspec = format!("HEAD:refs/heads/{branch}");
-        git(
-            worktree,
-            &["push", "--quiet", push_remote(target), &refspec],
-        )
-        .await?;
+        git(worktree, &["push", "--quiet", PUSH_REMOTE, &refspec]).await?;
         Ok(())
     }
 
@@ -166,6 +221,36 @@ async fn add_worktree(mirror: &Path, path: &Path, branch: &str, base_ref: &str) 
         .await?;
     }
     Ok(())
+}
+
+/// The fetch or push URL of a remote, or `None` when there is no such remote.
+async fn remote_url(dir: &Path, name: &str, push: bool) -> Option<String> {
+    let args: &[&str] = if push {
+        &["remote", "get-url", "--push", name]
+    } else {
+        &["remote", "get-url", name]
+    };
+    git(dir, args).await.ok().map(|url| url.trim().to_owned())
+}
+
+/// Rename the remotes of a clone made when `origin` was the upstream
+/// repository and `fork` the fork: the upstream becomes `upstream`, keeping
+/// its fetched refs, and the fork becomes `origin`. True when it renamed.
+async fn migrate_remotes(mirror: &Path) -> Result<bool> {
+    let names = git(mirror, &["remote"]).await?;
+    let has = |name: &str| names.lines().any(|l| l.trim() == name);
+    if !has(OLD_FORK_REMOTE) {
+        return Ok(false);
+    }
+    if has(UPSTREAM_REMOTE) {
+        git(mirror, &["remote", "remove", OLD_FORK_REMOTE]).await?;
+    } else {
+        if has(PUSH_REMOTE) {
+            git(mirror, &["remote", "rename", PUSH_REMOTE, UPSTREAM_REMOTE]).await?;
+        }
+        git(mirror, &["remote", "rename", OLD_FORK_REMOTE, PUSH_REMOTE]).await?;
+    }
+    Ok(true)
 }
 
 /// Give commits an author when the machine has no git identity configured.

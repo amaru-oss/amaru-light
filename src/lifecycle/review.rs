@@ -216,6 +216,7 @@ impl Job<'_> {
             .commit_leftovers(&worktree, "Address review feedback")
             .await?;
         let branch = self.ticket.branch.clone().context("ticket has no branch")?;
+        self.ensure_remotes().await?;
         self.svc
             .workspace
             .push(&worktree, &self.target(), &branch)
