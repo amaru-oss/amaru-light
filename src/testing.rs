@@ -41,6 +41,8 @@ if [ -f "$dir/tamper" ]; then
 fi
 mkdir -p .amaru
 case "$prompt" in
+  *"stepped in on your work"*) touch guided.txt; c add guided.txt; c commit -qm guided
+    echo '{"status":"done","summary":"Followed the guidance"}' > .amaru/result.json ;;
   *"You are working on issue"*) echo done >> feature.txt; c add feature.txt; c commit -qm feature
     echo '{"status":"done","summary":"Added the feature","complete":true}' > .amaru/result.json ;;
   *"project check"*) touch fixed.txt; c add fixed.txt; c commit -qm fix
@@ -188,8 +190,9 @@ impl TicketSource for FakeForge {
 
 #[async_trait]
 impl Forge for FakeForge {
-    async fn find_pr(&self, _: &Target, _: &str) -> Result<Option<PullRequest>> {
-        Ok(None)
+    async fn find_pr(&self, _: &Target, branch: &str) -> Result<Option<PullRequest>> {
+        let index = self.state().prs.iter().position(|p| p.branch == branch);
+        Ok(index.map(|i| self.pr_for(i)))
     }
     /// Like GitHub, make the fork as a copy of the upstream repository when
     /// it is missing.

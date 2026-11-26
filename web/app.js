@@ -243,7 +243,8 @@ async function showTicket(id) {
     h("div", { class: "timeline-head" }, h("h2", {}, "Timeline"),
       h("label", {}, follow, "Follow new events")),
     h("div", { class: "card" }, events));
-  render(top, h("div", { class: "grid" }, timeline, side));
+  const guidance = h("div");
+  render(top, guidance, h("div", { class: "grid" }, timeline, side));
 
   let after = 0;
   let lastState = null;
@@ -252,6 +253,7 @@ async function showTicket(id) {
     if (t.state !== lastState || !top.dataset.drawn) {
       drawTop(top, t, refresh);
       lastState = t.state;
+      drawGuide(guidance, t, refresh);
     }
     drawSide(side, t);
     const fresh = await api(`/api/tickets/${id}/events?after=${after}`);
@@ -296,6 +298,44 @@ function drawTop(container, t, refresh) {
         h("p", {}, "Blocked: the daemon needs you"),
         h("pre", {}, t.reason))
       : null);
+}
+
+/** The guidance form: free-form directions for the ticket's agent. Drawn
+ *  again only when the state changes, so a draft survives the refreshes. */
+function drawGuide(container, t, refresh) {
+  if (t.state === "DONE" || t.state === "CANCELLED") return fill(container);
+  const hint = {
+    BLOCKED: "The ticket continues with your directions.",
+    AWAITING_REVIEW: "The agent follows them, the checks run, and the branch is pushed again.",
+    QUEUED: "The agent gets them with the issue when it starts.",
+    PREPARING: "The agent gets them with the issue when it starts.",
+  }[t.state] || "A running agent is stopped and resumed with them.";
+  const field = h("textarea", { rows: 3, placeholder: "Tell the agent what to do next…", "aria-label": "Guidance for the agent" });
+  const button = h("button", { type: "submit" }, "Send to agent");
+  const message = h("p", { class: "guide-note" }, `${hint} The daemon picks them up at its next poll.`);
+  const send = async (event) => {
+    event.preventDefault();
+    if (!field.value.trim()) return field.focus();
+    button.disabled = true;
+    try {
+      await api(`/api/tickets/${t.id}/guide`, { method: "POST", body: JSON.stringify({ text: field.value }) });
+      field.value = "";
+      message.replaceChildren("Sent. The agent gets it at the daemon's next poll.");
+      await refresh();
+    } catch (error) {
+      if (error instanceof Unauthorized) return showLogin();
+      message.replaceChildren(h("span", { class: "bad" }, error.message));
+    } finally {
+      button.disabled = false;
+    }
+  };
+  const keys = (event) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) send(event);
+  };
+  field.addEventListener("keydown", keys);
+  fill(container, h("form", { class: "card guide", onsubmit: send },
+    h("label", {}, h("span", { class: "guide-title" }, "Guide the agent"), field),
+    h("div", { class: "guide-foot" }, message, button)));
 }
 
 async function act(event, t, action, refresh) {
@@ -363,6 +403,16 @@ function eventItem(e) {
     case "CANCELLED":
       cls = "bad";
       body = "Cancelled by the operator";
+      break;
+    case "GUIDANCE":
+      cls = "guidance";
+      body = [`Guidance for the agent${p.by ? ` (from the ${p.by})` : ""}`, h("pre", {}, p.text || "")];
+      break;
+    case "GUIDANCE_DELIVERED":
+      body = "Guidance given to the agent";
+      break;
+    case "INTERRUPTED":
+      body = "Stopped the agent to give it the guidance; it resumes at the next poll";
       break;
     case "AGENT_TEXT":
       cls = "agent-text";

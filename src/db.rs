@@ -29,7 +29,31 @@ CREATE TABLE IF NOT EXISTS events (
     payload TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_ticket ON events (ticket_id, id);
+CREATE TABLE IF NOT EXISTS guidance (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL REFERENCES tickets (id),
+    at TEXT NOT NULL,
+    by TEXT NOT NULL,
+    text TEXT NOT NULL,
+    stopped TEXT,
+    delivered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS guidance_ticket ON guidance (ticket_id, delivered_at);
 ";
+
+/// Directions an operator wrote for a ticket's agent, kept apart from the
+/// ticket row so that a running job, which saves its own copy of the
+/// ticket, cannot overwrite them.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Guidance {
+    pub id: i64,
+    pub at: String,
+    /// Where it came from: `command line` or `web`.
+    pub by: String,
+    pub text: String,
+    /// Why the ticket was blocked when the guidance came, if it was.
+    pub stopped: Option<String>,
+}
 
 /// One entry of a ticket's event log.
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -251,6 +275,58 @@ impl Store {
         })
     }
 
+    /// Keep guidance for the ticket's agent until a turn delivers it.
+    pub fn add_guidance(
+        &self,
+        ticket: i64,
+        by: &str,
+        text: &str,
+        stopped: Option<&str>,
+    ) -> Result<i64> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO guidance (ticket_id, at, by, text, stopped)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![ticket, now(), by, text, stopped],
+            )?;
+            Ok(c.last_insert_rowid())
+        })
+    }
+
+    /// Guidance not yet given to the agent, oldest first.
+    pub fn pending_guidance(&self, ticket: i64) -> Result<Vec<Guidance>> {
+        self.with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, at, by, text, stopped FROM guidance
+                 WHERE ticket_id = ?1 AND delivered_at IS NULL ORDER BY id",
+            )?;
+            let rows = stmt.query_map([ticket], |r| {
+                Ok(Guidance {
+                    id: r.get(0)?,
+                    at: r.get(1)?,
+                    by: r.get(2)?,
+                    text: r.get(3)?,
+                    stopped: r.get(4)?,
+                })
+            })?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })
+    }
+
+    /// Record that these guidance entries went to the agent.
+    pub fn deliver_guidance(&self, ids: &[i64]) -> Result<()> {
+        let at = now();
+        self.with(|c| {
+            for id in ids {
+                c.execute(
+                    "UPDATE guidance SET delivered_at = ?1 WHERE id = ?2",
+                    params![at, id],
+                )?;
+            }
+            Ok(())
+        })
+    }
+
     /// Events of a ticket with an id greater than `after`, oldest first.
     pub fn events(&self, ticket: i64, after: i64) -> Result<Vec<Event>> {
         let rows: Vec<(i64, String, String, String)> = self.with(|c| {
@@ -366,6 +442,29 @@ mod tests {
         assert_eq!(events[0].kind, "CLAIMED");
         assert_eq!(events[1].payload["to"], "PREPARING");
         assert_eq!(store.events(ticket.id, events[0].id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn keeps_guidance_until_it_is_delivered() {
+        let (_dir, store) = store();
+        let ticket = store
+            .claim("me/demo", 1, "T", Origin::Manual)
+            .unwrap()
+            .unwrap();
+        let first = store
+            .add_guidance(ticket.id, "web", "use ring", None)
+            .unwrap();
+        store
+            .add_guidance(ticket.id, "web", "skip docs", Some("stuck"))
+            .unwrap();
+        let pending = store.pending_guidance(ticket.id).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].text, "use ring");
+        store.deliver_guidance(&[first]).unwrap();
+        let pending = store.pending_guidance(ticket.id).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].text, "skip docs");
+        assert!(store.pending_guidance(99).unwrap().is_empty());
     }
 
     #[test]

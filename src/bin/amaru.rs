@@ -8,6 +8,7 @@ use amaru_light::{
     lifecycle::Services,
     process,
     scheduler::{Intake, Scheduler},
+    ticket::State,
 };
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -53,6 +54,18 @@ enum Command {
     },
     /// Let a blocked ticket continue where it stopped.
     Unblock { ticket: i64 },
+    /// Give a ticket's agent directions, in its own session: a blocked
+    /// ticket continues with them, and a running agent is stopped and
+    /// resumed with them.
+    Guide {
+        ticket: i64,
+        /// The directions, as words on the command line.
+        #[arg(required_unless_present = "file", conflicts_with = "file")]
+        message: Vec<String>,
+        /// Read the directions from a file instead.
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
     /// Stop working on a ticket.
     Cancel { ticket: i64 },
     /// Check the tools and credentials the daemon needs.
@@ -84,6 +97,11 @@ async fn dispatch(cli: Cli) -> Result<()> {
         }
         Command::Status { ticket } => status(&svc, ticket),
         Command::Unblock { ticket } => resume(&svc, ticket).await,
+        Command::Guide {
+            ticket,
+            message,
+            file,
+        } => guide(&svc, ticket, &message, file.as_deref()).await,
         Command::Cancel { ticket } => cancel(&svc, ticket),
         Command::Doctor => Ok(()),
     }
@@ -154,6 +172,30 @@ fn status(svc: &Services, ticket: Option<i64>) -> Result<()> {
 async fn resume(svc: &Services, id: i64) -> Result<()> {
     let ticket = actions::resume(svc, id).await?;
     println!("ticket {id} continues from {}", ticket.state);
+    Ok(())
+}
+
+async fn guide(
+    svc: &Services,
+    id: i64,
+    message: &[String],
+    file: Option<&std::path::Path>,
+) -> Result<()> {
+    let text = match file {
+        Some(path) => std::fs::read_to_string(path)
+            .with_context(|| format!("cannot read {}", path.display()))?,
+        None => message.join(" "),
+    };
+    let ticket = actions::guide(svc, id, &text, "command line").await?;
+    let when = if ticket.state == State::AwaitingReview {
+        "runs a turn for it, checks and pushes"
+    } else {
+        "receives it in its next turn, and a running agent is restarted with it"
+    };
+    println!(
+        "guidance saved for ticket {id} ({}): the agent {when} at the daemon's next poll",
+        ticket.state
+    );
     Ok(())
 }
 

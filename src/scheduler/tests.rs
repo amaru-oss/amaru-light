@@ -113,3 +113,59 @@ async fn a_blocked_ticket_without_its_label_waits_for_unblock() {
     crate::lifecycle::unblock(&mut ticket);
     assert_eq!(ticket.state, State::Checking);
 }
+
+#[tokio::test]
+async fn guidance_for_a_ticket_in_review_runs_a_turn_and_pushes() {
+    let fake = Fake::new("").await;
+    fake.forge.update_issue(1, |_| {});
+    let scheduler = scheduler(&fake, Intake::Autonomous);
+    settle(&scheduler).await;
+    let ticket = fake.svc.store.open_ticket("me/app", 1).unwrap().unwrap();
+    assert_eq!(ticket.state, State::AwaitingReview);
+    let comments = fake.forge.state().comments.len();
+    crate::actions::guide(&fake.svc, ticket.id, "Also add guided.txt", "web")
+        .await
+        .unwrap();
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
+    assert!(
+        fake.prompts()
+            .last()
+            .unwrap()
+            .contains("Also add guided.txt")
+    );
+    let forge = fake.forge.state();
+    assert_eq!(forge.prs.len(), 1);
+    // The pull request already existed: no second "opened" comment.
+    assert_eq!(forge.comments.len(), comments);
+}
+
+#[tokio::test]
+async fn guidance_stops_a_running_agent_and_restarts_it_with_the_guidance() {
+    let fake = Fake::new("").await;
+    fake.forge.update_issue(1, |_| {});
+    std::fs::write(fake.dir.path().join("agent/stall"), "").unwrap();
+    let scheduler = scheduler(&fake, Intake::Autonomous);
+    scheduler.tick().await.unwrap();
+    for _ in 0..200 {
+        if !fake.prompts().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let ticket = fake.svc.store.open_ticket("me/app", 1).unwrap().unwrap();
+    assert_eq!(ticket.state, State::Implementing);
+    crate::actions::guide(&fake.svc, ticket.id, "Try the other way", "web")
+        .await
+        .unwrap();
+    // This poll stops the agent; the next one starts it with the guidance.
+    settle(&scheduler).await;
+    let events = fake.svc.store.events(ticket.id, 0).unwrap();
+    assert!(events.iter().any(|e| e.kind == "INTERRUPTED"));
+    assert_eq!(states(&fake), [(1, State::Implementing)]);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
+    let prompts = fake.prompts();
+    assert_eq!(prompts.len(), 2);
+    assert!(prompts[1].contains("Try the other way"));
+}

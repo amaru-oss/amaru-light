@@ -146,6 +146,15 @@ resumes the same session on its next poll and blocks the ticket after three
 stalls in a row. If the agent was only running a long build, raise
 `idle_timeout` in the project file.
 
+**The agent is stuck, loops on a failing check, or goes the wrong way.**
+Give it directions with `amaru guide <id> "..."` or the ticket's web page.
+They reach the agent in its own session at the daemon's next poll: a
+running agent is stopped (the timeline shows `interrupted`) and resumed
+with them on the poll after, a blocked ticket continues with them and a
+fresh fix budget, and a ticket waiting for review runs a turn for them, the
+checks, and pushes. Guidance sent before the agent's first turn goes into
+that turn's prompt. After the guidance turn the checks always run again.
+
 **An unblocked ticket shows as in progress but no agent runs.** Look for
 `waiting for a worker slot` in the log: every slot of `max_parallel` is taken
 by another ticket, and this one starts when a slot frees. When the ticket

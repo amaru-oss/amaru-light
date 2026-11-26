@@ -105,22 +105,29 @@ impl Job<'_> {
             self.ticket.summary.clone().unwrap_or_default(),
         ));
         let prompt = self.svc.prompts.render(name, &as_refs(&vars));
+        let prompt = self.with_guidance(prompt)?;
         let report = self
             .turn(&self.project.agent.clone(), &prompt, Session::Ticket)
             .await?;
         let next = self.accept(report, State::Checking).await?;
         self.commit_leftovers("Complete the agent's changes")
             .await?;
-        if self
+        self.require_commits().await?;
+        Ok(next)
+    }
+
+    /// Stop the ticket when its branch has nothing on top of the base.
+    pub(super) async fn require_commits(&self) -> Result<()> {
+        let worktree = self.worktree()?;
+        let ahead = self
             .svc
             .workspace
-            .ahead(&self.worktree()?, &self.base_ref()?)
-            .await?
-            == 0
-        {
+            .ahead(&worktree, &self.base_ref()?)
+            .await?;
+        if ahead == 0 {
             return Err(blocked("the agent finished without committing any change"));
         }
-        Ok(next)
+        Ok(())
     }
 
     /// The agent cannot read Jira itself: give it the latest comments.
@@ -132,7 +139,7 @@ impl Job<'_> {
         Ok(())
     }
 
-    async fn commit_leftovers(&self, message: &str) -> Result<()> {
+    pub(super) async fn commit_leftovers(&self, message: &str) -> Result<()> {
         let worktree = self.worktree()?;
         self.svc
             .workspace
@@ -232,8 +239,13 @@ impl Job<'_> {
             .push(&self.worktree()?, &target, &branch)
             .await?;
         let pr = self.ensure_pr(&target, &branch).await?;
+        let known = self.ticket.pr_number == Some(pr.number);
         self.ticket.pr_number = Some(pr.number);
         self.save()?;
+        if known {
+            // Published again, after guidance: the issue already links it.
+            return Ok(State::AwaitingReview);
+        }
         let note = format!("Amaru opened {} for this issue.", pr.url);
         let (repo, number) = (&self.ticket.repo, self.ticket.number);
         self.svc.source.comment(repo, number, &note).await?;
