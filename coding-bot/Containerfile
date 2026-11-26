@@ -11,7 +11,7 @@
 #
 # Run it with the bot's token and one home volume:
 #   export GH_TOKEN=<orp-bot token>
-#   podman run -d --name amaru-light-amaru-light -e GH_TOKEN \
+#   podman run -d --init --name amaru-light-amaru-light -e GH_TOKEN \
 #     -p 127.0.0.1:8767:8767 \
 #     -v amaru-light-amaru-light:/home/mini-amaru:U \
 #     localhost/amaru-light-amaru-light:dev

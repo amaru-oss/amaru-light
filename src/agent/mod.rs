@@ -80,6 +80,8 @@ impl std::fmt::Debug for Agent {
 pub struct Workplace<'a> {
     pub cwd: &'a Path,
     pub timeout: Duration,
+    /// Stop the turn once the agent prints nothing for this long.
+    pub idle: Option<Duration>,
     pub cancel: Option<Cancel>,
 }
 
@@ -106,6 +108,7 @@ impl Agent {
             cwd: place.cwd.to_path_buf(),
             stdin: Some(turn.prompt.to_owned()),
             timeout: place.timeout,
+            idle: place.idle,
         };
         let mut result = TurnResult {
             session_id: turn.session.map(str::to_owned),
@@ -156,6 +159,7 @@ mod tests {
         let place = Workplace {
             cwd: dir.path(),
             timeout: Duration::from_secs(10),
+            idle: None,
             cancel: None,
         };
         let turn = Turn {

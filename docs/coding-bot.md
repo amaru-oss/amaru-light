@@ -46,7 +46,7 @@ still works but takes time again each time the container is recreated.
 
 ```sh
 export GH_TOKEN=<orp-bot token>
-podman run -d --name amaru-light-amaru-light \
+podman run -d --init --name amaru-light-amaru-light \
   -e GH_TOKEN \
   -p 127.0.0.1:8767:8767 \
   -v amaru-light-amaru-light:/home/mini-amaru:U \

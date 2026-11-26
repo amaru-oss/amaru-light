@@ -132,7 +132,25 @@ then `amaru unblock <id>`.
 error, for example a usage limit or an expired login. The reason holds the
 end of its output.
 
+**The log says `the agent printed nothing for 1800s and was stopped`.** The
+agent CLI went quiet for `idle_timeout`, often because its connection to the
+model died, for example after the machine changed networks. The daemon
+resumes the same session on its next poll and blocks the ticket after three
+stalls in a row. If the agent was only running a long build, raise
+`idle_timeout` in the project file.
+
+**An unblocked ticket shows as in progress but no agent runs.** Look for
+`waiting for a worker slot` in the log: every slot of `max_parallel` is taken
+by another ticket, and this one starts when a slot frees. When the ticket
+that holds the slot seems stuck, `amaru cancel <id>` stops it on the next poll.
+
 ## Containers
+
+**`ps` shows zombie `gh` or `git` processes.** Inside a container the daemon
+is process 1, and processes the agent started and left behind are handed to
+it when the agent exits; process 1 has to reap them, and the daemon does not.
+Start the container with `--init` (Podman and Docker both have it): a small
+init runs as process 1 and reaps them.
 
 **`/home/mini-amaru/...` is empty: where is the code?** Under `state_dir`:
 `<state_dir>/repos/<owner>/<name>/mirror` is the clone and

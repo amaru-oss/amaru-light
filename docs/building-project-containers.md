@@ -119,7 +119,7 @@ GitHub token, the fork and labels, see [GitHub access](github-access.md).
 ```sh
 podman build -f Containerfile.project -t localhost/amaru-light-my-project:dev .
 
-podman run -d --name amaru-light-my-project \
+podman run -d --init --name amaru-light-my-project \
   -e GH_TOKEN \
   -p 127.0.0.1:8765:8765 \
   -v "$PWD/amaru-config:/config:ro,Z" \

@@ -24,20 +24,44 @@ impl Scheduler {
     async fn work(self: Arc<Self>, ticket: Ticket, cancel: watch::Receiver<bool>) {
         let id = ticket.id;
         let reference = ticket.reference();
-        if let Ok(_slot) = Arc::clone(&self.slots).acquire_owned().await {
-            log(&format!("{reference}: working ({})", ticket.state));
-            match self.drive(ticket, cancel).await {
-                Ok(state) => {
-                    log(&format!("{reference}: {state}"));
-                    if let Ok(mut errors) = lock(&self.errors) {
-                        errors.remove(&id);
-                    }
+        let slot = match Arc::clone(&self.slots).try_acquire_owned() {
+            Ok(slot) => Ok(slot),
+            Err(_) => {
+                log(&format!(
+                    "{reference}: waiting for a worker slot (all {} are busy)",
+                    self.svc.settings.daemon.max_parallel
+                ));
+                Arc::clone(&self.slots).acquire_owned().await
+            }
+        };
+        if let Ok(_slot) = slot {
+            // The ticket may have waited for the slot for a long time; work
+            // on it as it is now, not as it was when it was dispatched.
+            match self.svc.store.get(id) {
+                Ok(Some(current)) if current.state.needs_slot() => {
+                    Box::pin(self.run_ticket(current, cancel)).await;
                 }
+                Ok(_) => {}
                 Err(e) => log(&format!("{reference}: {e:#}")),
             }
         }
         if let Ok(mut running) = lock(&self.running) {
             running.remove(&id);
+        }
+    }
+
+    async fn run_ticket(&self, ticket: Ticket, cancel: watch::Receiver<bool>) {
+        let id = ticket.id;
+        let reference = ticket.reference();
+        log(&format!("{reference}: working ({})", ticket.state));
+        match self.drive(ticket, cancel).await {
+            Ok(state) => {
+                log(&format!("{reference}: {state}"));
+                if let Ok(mut errors) = lock(&self.errors) {
+                    errors.remove(&id);
+                }
+            }
+            Err(e) => log(&format!("{reference}: {e:#}")),
         }
     }
 

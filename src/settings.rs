@@ -413,6 +413,9 @@ pub struct ProjectSettings {
     pub agent: String,
     #[serde(default = "default_step_timeout")]
     pub step_timeout: Span,
+    /// Stop an agent turn that prints nothing for this long; `0` never does.
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout: Span,
     #[serde(default)]
     pub checks: Vec<CheckSettings>,
     #[serde(default = "default_fix_rounds")]
@@ -449,6 +452,9 @@ fn default_prefix() -> String {
 }
 const fn default_step_timeout() -> Span {
     Span::secs(45 * 60)
+}
+const fn default_idle_timeout() -> Span {
+    Span::secs(30 * 60)
 }
 const fn default_fix_rounds() -> u32 {
     3

@@ -55,6 +55,7 @@ impl Job<'_> {
         let place = Workplace {
             cwd: &cwd,
             timeout: self.project.step_timeout.0,
+            idle: Some(self.project.idle_timeout.0).filter(|d| !d.is_zero()),
             cancel: self.cancel.clone(),
         };
         let (store, id) = (&self.svc.store, self.ticket.id);
@@ -125,11 +126,13 @@ impl Job<'_> {
             let fresh = self.context_pack(prompt).await?;
             result = self.run_agent(agent, &fresh, None).await?;
         }
-        self.judge(&result)?;
+        // Keep the session even when the turn failed: whatever runs next,
+        // a retry or a human unblock, resumes the session the agent was in.
         if mode == Session::Ticket && result.session_id.is_some() {
             self.ticket.session_id.clone_from(&result.session_id);
             self.save()?;
         }
+        self.judge(&result)?;
         Ok(result)
     }
 
@@ -141,6 +144,13 @@ impl Job<'_> {
                 "the agent did not finish within {}",
                 self.project.step_timeout
             ))),
+            // Not blocked: the daemon retries in the same session, which is
+            // what gets an agent past a dropped connection, and blocks the
+            // ticket after a few stalls in a row.
+            Some(Exit::Stalled) => Err(anyhow::anyhow!(
+                "the agent printed nothing for {} and was stopped",
+                self.project.idle_timeout
+            )),
             _ if !result.succeeded() => {
                 let detail = if result.text.is_empty() {
                     &result.stderr
