@@ -111,6 +111,7 @@ intake:
 
 agent: codex
 step_timeout: 45m
+idle_timeout: 30m
 
 checks:
   - name: check
@@ -138,6 +139,7 @@ workspace:
 | `branch_prefix` | `amaru/` | Ticket branches are `<prefix><issue>-<slug>`, for example `amaru/42-fix-the-export-button` or, for a Jira issue, `amaru/CAMEL-12345-fix-the-export-button`. Include the separator, `/` or `-`, in the prefix. |
 | `agent` | required | A name from `agents:` in the daemon file. |
 | `step_timeout` | `45m` | The longest one agent turn may run. |
+| `idle_timeout` | `30m` | Stop an agent turn that prints nothing for this long, for example a CLI stuck on a dropped connection. The daemon then resumes the same session on its next poll, and blocks the ticket after three stalls in a row. Raise it when the agent runs builds or tests that take longer without output; `0` turns it off. |
 | `checks` | `[]` | Commands the daemon runs itself after each agent turn, in order, through `sh -c` in the ticket's worktree. |
 | `max_fix_rounds` | `3` | How many times failing checks go back to the agent before the ticket blocks. |
 | `jira` | none | Take the tickets from a Jira project instead of the repository's GitHub issues. See [Jira](#jira) below. |

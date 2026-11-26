@@ -147,7 +147,7 @@ docs/coding-bot.md, or wherever the project keeps contributor docs), with:
   Say which toolchain pins must be kept in step with the Containerfile.
 - Run:
     export GH_TOKEN=<bot token>
-    podman run -d --name amaru-light-<project> \
+    podman run -d --init --name amaru-light-<project> \
       -e GH_TOKEN \
       -p 127.0.0.1:8765:8765 \
       -v amaru-light-<project>:/home/mini-amaru:U \

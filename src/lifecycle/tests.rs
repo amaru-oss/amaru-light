@@ -194,3 +194,20 @@ async fn works_without_permission_to_label_issues() {
     let events = fake.svc.store.events(ticket.id, 0).unwrap();
     assert!(events.iter().any(|e| e.kind == "LABEL_SKIPPED"));
 }
+
+#[tokio::test]
+async fn a_silent_agent_is_stopped_and_retried_in_its_session() {
+    let fake = Fake::with_project("", "idle_timeout: 1s\n").await;
+    std::fs::write(fake.dir.path().join("agent/stall"), "").unwrap();
+    let ticket = fake.claim(1).await;
+    let mut job = Job::new(&fake.svc, ticket, None).unwrap();
+    let error = job.drive().await.unwrap_err();
+    assert!(format!("{error:#}").contains("printed nothing for 1s"));
+    let id = job.into_ticket().id;
+    let stored = fake.svc.store.get(id).unwrap().unwrap();
+    assert_eq!(stored.state, State::Implementing);
+    assert_eq!(stored.session_id.as_deref(), Some("sess-1"));
+    let ticket = drive(&fake, stored).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    assert!(fake.resumed_every_turn_after_the_first());
+}

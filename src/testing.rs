@@ -29,6 +29,11 @@ dir=$(dirname "$0")
 n=$(ls "$dir"/prompt-* 2>/dev/null | wc -l)
 printf '%s' "$prompt" > "$dir/prompt-$n"
 echo "$*" > "$dir/args-$n"
+if [ -f "$dir/stall" ]; then
+  rm "$dir/stall"
+  echo '{"type":"system","subtype":"init","session_id":"sess-1"}'
+  sleep 30
+fi
 c() { git -c user.name=agent -c user.email=agent@example.com "$@"; }
 mkdir -p .amaru
 case "$prompt" in
@@ -276,7 +281,7 @@ impl Fake {
         .await
     }
 
-    async fn with_project(check: &str, extra: &str) -> Self {
+    pub async fn with_project(check: &str, extra: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         upstream(dir.path()).await;
         let settings = Settings::load(&write_settings(dir.path(), check, extra)).unwrap();

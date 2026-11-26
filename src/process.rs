@@ -5,7 +5,13 @@
 //! background cannot outlive it.
 
 use anyhow::{Context, Result};
-use std::{collections::BTreeMap, path::PathBuf, process::Stdio, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    process::Stdio,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
+};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdout, Command},
@@ -14,6 +20,11 @@ use tokio::{
 
 /// Bytes of stderr kept for error messages.
 const STDERR_TAIL: usize = 4_000;
+
+/// How long output is still read once the process has ended. A descendant
+/// that left the process group (with `setsid`, for example) can keep the
+/// pipes open for as long as it lives; the run must not wait for it.
+const DRAIN: Duration = Duration::from_secs(2);
 
 /// What to run.
 #[derive(Clone, Debug, Default)]
@@ -25,6 +36,8 @@ pub struct Spec {
     /// Written to stdin, which is then closed.
     pub stdin: Option<String>,
     pub timeout: Duration,
+    /// Stop the process once it prints nothing on stdout for this long.
+    pub idle: Option<Duration>,
 }
 
 /// How a run ended.
@@ -34,6 +47,8 @@ pub enum Exit {
     /// Killed by a signal.
     Signal,
     TimedOut,
+    /// Printed nothing for longer than `Spec::idle`.
+    Stalled,
     Cancelled,
 }
 
@@ -138,29 +153,95 @@ fn start_io(child: &mut Child, input: String) -> Result<IoTasks> {
     Ok((stdout, feeder, errors))
 }
 
+/// Resolve once nothing was printed for `idle`; never without a limit.
+/// `last` is when the latest line arrived, in milliseconds after `start`.
+async fn silent(idle: Option<Duration>, start: Instant, last: &AtomicU64) {
+    let Some(idle) = idle else {
+        return std::future::pending().await;
+    };
+    loop {
+        let seen = start + Duration::from_millis(last.load(Ordering::Relaxed));
+        let quiet = seen.elapsed();
+        if quiet >= idle {
+            return;
+        }
+        tokio::time::sleep(idle - quiet).await;
+    }
+}
+
 /// Run `spec`, passing every stdout line to `on_line` as it arrives.
+///
+/// The run ends when the process exits, not when its output closes: a
+/// descendant outside the process group may hold the pipes for much longer.
 pub async fn run(
     spec: &Spec,
     cancel: Option<Cancel>,
     on_line: &mut (dyn FnMut(&str) + Send),
 ) -> Result<Output> {
     let mut child = spawn(spec).await?;
-    let (stdout, feeder, errors) = start_io(&mut child, spec.stdin.clone().unwrap_or_default())?;
-    let work = async {
-        pump(stdout, on_line).await?;
-        Ok::<_, anyhow::Error>(child.wait().await?)
-    };
-    let exit = tokio::select! {
-        status = tokio::time::timeout(spec.timeout, work) => match status {
-            Ok(status) => status?.code().map_or(Exit::Signal, Exit::Code),
-            Err(_) => Exit::TimedOut,
-        },
-        () = cancelled(cancel) => Exit::Cancelled,
-    };
+    let (stdout, feeder, mut errors) =
+        start_io(&mut child, spec.stdin.clone().unwrap_or_default())?;
+    let ended = Box::pin(watch_child(&mut child, stdout, spec, cancel, on_line)).await;
     kill_group(&child);
     feeder.abort();
-    let stderr = tail(&errors.await.unwrap_or_default(), STDERR_TAIL);
-    Ok(Output { exit, stderr })
+    if !exited(&ended) {
+        // Reap the killed process so it does not linger as a zombie.
+        let _ = tokio::time::timeout(DRAIN, child.wait()).await;
+    }
+    let stderr = match tokio::time::timeout(DRAIN, &mut errors).await {
+        Ok(text) => text.unwrap_or_default(),
+        Err(_) => {
+            errors.abort();
+            String::new()
+        }
+    };
+    let stderr = tail(&stderr, STDERR_TAIL);
+    ended.map(|exit| Output { exit, stderr })
+}
+
+/// The process ended by itself.
+const fn exited(ended: &Result<Exit>) -> bool {
+    matches!(ended, Ok(Exit::Code(_) | Exit::Signal))
+}
+
+/// Pass on stdout until the process exits, times out, falls silent or is
+/// cancelled.
+async fn watch_child(
+    child: &mut Child,
+    stdout: ChildStdout,
+    spec: &Spec,
+    cancel: Option<Cancel>,
+    on_line: &mut (dyn FnMut(&str) + Send),
+) -> Result<Exit> {
+    let start = Instant::now();
+    let last = AtomicU64::new(0);
+    let mut seen = |line: &str| {
+        let now = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+        last.store(now, Ordering::Relaxed);
+        on_line(line);
+    };
+    let mut pumping = Box::pin(pump(stdout, &mut seen));
+    let mut deadline = Box::pin(tokio::time::sleep(spec.timeout));
+    let mut closed = false;
+    let ended = loop {
+        tokio::select! {
+            read = &mut pumping, if !closed => match read {
+                Ok(()) => closed = true,
+                Err(e) => break Err(e),
+            },
+            status = child.wait() => break Ok(status?.code().map_or(Exit::Signal, Exit::Code)),
+            () = &mut deadline => break Ok(Exit::TimedOut),
+            () = silent(spec.idle, start, &last) => break Ok(Exit::Stalled),
+            () = cancelled(cancel.clone()) => break Ok(Exit::Cancelled),
+        }
+    };
+    if exited(&ended) && !closed {
+        // Read what is left; give up when a descendant keeps the pipe open.
+        if let Ok(Err(e)) = tokio::time::timeout(DRAIN, &mut pumping).await {
+            return Err(e);
+        }
+    }
+    ended
 }
 
 /// Run a shell command and return its exit and the tail of its combined output.
@@ -287,6 +368,47 @@ mod tests {
         .unwrap();
         assert_eq!(exit, Exit::Code(1));
         assert_eq!(text, "out\nerr\n");
+    }
+
+    #[tokio::test]
+    async fn ends_with_the_process_even_when_a_descendant_keeps_its_pipes() {
+        let started = std::time::Instant::now();
+        let mut lines = Vec::new();
+        let out = run(&sh("setsid sleep 20 & echo hi", 20_000), None, &mut |l| {
+            lines.push(l.to_owned());
+        })
+        .await
+        .unwrap();
+        assert!(out.success());
+        assert_eq!(lines, ["hi"]);
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn times_out_even_when_a_descendant_keeps_its_pipes() {
+        let started = std::time::Instant::now();
+        let out = run(&sh("setsid sleep 20 & sleep 30", 100), None, &mut |_| {})
+            .await
+            .unwrap();
+        assert_eq!(out.exit, Exit::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn stops_a_silent_process_but_not_a_chatty_one() {
+        let quiet = Spec {
+            idle: Some(Duration::from_millis(300)),
+            ..sh("echo start; sleep 30", 20_000)
+        };
+        let started = std::time::Instant::now();
+        let out = run(&quiet, None, &mut |_| {}).await.unwrap();
+        assert_eq!(out.exit, Exit::Stalled);
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let chatty = Spec {
+            idle: Some(Duration::from_millis(300)),
+            ..sh("for i in 1 2 3 4 5 6; do echo $i; sleep 0.1; done", 20_000)
+        };
+        assert!(run(&chatty, None, &mut |_| {}).await.unwrap().success());
     }
 
     #[test]
