@@ -5,7 +5,7 @@ use crate::{
     checks,
     contract::{Report, Status},
     forge::{NewPullRequest, PullRequest, Target},
-    settings::SelfReview,
+    settings::{GuardInput, SelfReview},
     ticket::{State, slug},
 };
 use anyhow::{Context, Result};
@@ -97,9 +97,9 @@ impl Job<'_> {
         if resumed {
             self.refresh_jira_body().await?;
         }
-        let vars = self.issue_vars();
+        Box::pin(self.screen_issue()).await?;
+        let mut vars = self.issue_vars();
         let name = if resumed { "continue" } else { "implement" };
-        let mut vars = vars;
         vars.push((
             "reason".into(),
             self.ticket.summary.clone().unwrap_or_default(),
@@ -186,6 +186,8 @@ impl Job<'_> {
         ));
         self.event("CHECK_FAILED", &serde_json::to_value(&failure)?)?;
         self.next_fix_round(&failure)?;
+        let what = format!("the output of `{}`", failure.name);
+        Box::pin(self.screen_or_block(GuardInput::Checks, &what, &failure.output)).await?;
         let vars = [
             ("check", failure.command.as_str()),
             ("output", failure.output.as_str()),

@@ -62,6 +62,17 @@ echo '{"type":"system","subtype":"init","session_id":"sess-1"}'
 echo '{"type":"result","is_error":false,"result":"ok","session_id":"sess-1"}'
 "#;
 
+/// A prompt guard that rejects text with `IGNORE` and fails on `CRASH`.
+const GUARD: &str = r#"#!/bin/sh
+[ "$1" = download ] && exit 0
+text=$(cat)
+case "$text" in
+  *CRASH*) echo 'model failed' >&2; exit 3 ;;
+  *IGNORE*) echo '{"label":"injection","score":0.97}'; exit 1 ;;
+esac
+echo '{"label":"benign","score":0.02}'
+"#;
+
 #[derive(Debug, Default)]
 pub struct Denied {
     /// Labelling issues.
@@ -301,7 +312,7 @@ async fn seed(root: &Path) -> PathBuf {
     seed
 }
 
-fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
+fn write_settings(root: &Path, check: &str, extra: &str, guard: &str) -> PathBuf {
     let agent = root.join("agent/claude");
     std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
     std::fs::write(&agent, AGENT).unwrap();
@@ -315,7 +326,7 @@ fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
         "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}{extra}"
     )).unwrap();
     let daemon = format!(
-        "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
+        "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n{guard}",
         agent.display()
     );
     std::fs::write(root.join("daemon.yaml"), daemon).unwrap();
@@ -338,9 +349,28 @@ impl Fake {
     }
 
     pub async fn with_project(check: &str, extra: &str) -> Self {
+        Self::build(check, extra, "guard: {enabled: false}\n").await
+    }
+
+    /// The prompt guard is on, with the given inputs. Its fake rejects any
+    /// text with `IGNORE`, and fails on text with `CRASH`.
+    pub async fn guarded(check: &str, inputs: &str) -> Self {
+        let guard = format!(
+            "guard:\n  command: \"{{root}}/guard\"\n  inputs: [{inputs}]\n  timeout: 30s\n"
+        );
+        Self::build(check, "", &guard).await
+    }
+
+    async fn build(check: &str, extra: &str, guard: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         upstream(dir.path()).await;
-        let settings = Settings::load(&write_settings(dir.path(), check, extra)).unwrap();
+        let path = dir.path().join("guard");
+        std::fs::write(&path, GUARD).unwrap();
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let guard = guard.replace("{root}", &dir.path().display().to_string());
+        let config = write_settings(dir.path(), check, extra, &guard);
+        let settings = Settings::load(&config).unwrap();
         let forge = Arc::new(FakeForge::default());
         forge.state().remotes = Some(dir.path().join("remotes"));
         let url_base = format!("file://{}/remotes/", dir.path().display());
