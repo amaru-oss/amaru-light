@@ -4,6 +4,7 @@
 use amaru_light::{
     actions::{self, Claimed},
     app::services,
+    cleanup,
     forge::jira::{Curl, Jira},
     lifecycle::Services,
     process,
@@ -68,6 +69,18 @@ enum Command {
     },
     /// Stop working on a ticket.
     Cancel { ticket: i64 },
+    /// Delete the worktrees, build output and all, that no unfinished ticket
+    /// uses. The daemon does this on every poll; this does it now, also
+    /// while the daemon runs.
+    Clean {
+        /// Also delete the worktrees of blocked tickets. Their branches stay,
+        /// and unblocking recreates the worktree.
+        #[arg(long)]
+        blocked: bool,
+        /// List what would be deleted, and delete nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Check the tools and credentials the daemon needs.
     Doctor,
 }
@@ -103,6 +116,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
             file,
         } => guide(&svc, ticket, &message, file.as_deref()).await,
         Command::Cancel { ticket } => cancel(&svc, ticket),
+        Command::Clean { blocked, dry_run } => clean(&svc, blocked, dry_run).await,
         Command::Doctor => Ok(()),
     }
 }
@@ -202,6 +216,31 @@ async fn guide(
 fn cancel(svc: &Services, id: i64) -> Result<()> {
     actions::cancel(svc, id)?;
     println!("ticket {id} cancelled; a running daemon stops it at once");
+    Ok(())
+}
+
+async fn clean(svc: &Services, blocked: bool, dry_run: bool) -> Result<()> {
+    let options = cleanup::Sweep {
+        blocked,
+        dry_run,
+        ..Default::default()
+    };
+    let all = cleanup::sweep(svc, &options).await?;
+    let (failed, removed): (Vec<_>, Vec<_>) = all.into_iter().partition(|r| r.error.is_some());
+    let verb = if dry_run { "would delete" } else { "deleted" };
+    for gone in &removed {
+        let size = cleanup::human(gone.bytes);
+        println!("{verb} {size:>9}  {}", gone.path.display());
+    }
+    for kept in &failed {
+        let error = kept.error.as_deref().unwrap_or_default();
+        eprintln!("cannot delete {}: {error}", kept.path.display());
+    }
+    let total = cleanup::human(removed.iter().map(|r| r.bytes).sum());
+    println!("{verb} {} worktree(s), {total}", removed.len());
+    if !failed.is_empty() {
+        bail!("{} worktree(s) could not be deleted", failed.len());
+    }
     Ok(())
 }
 

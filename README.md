@@ -86,6 +86,20 @@ Self-review is optional per project: `off` (only act on reviews received),
 `same_agent` (the working session reviews its own diff) or `other_agent` (a
 fresh session of `review.reviewer_agent` reviews it).
 
+## Disk space
+
+Each ticket gets its own worktree, and builds in it (`target/`,
+`node_modules/`) can take gigabytes. The daemon deletes a worktree, with
+its build output, as soon as nothing will run in it again: on every poll it
+removes the worktrees of tickets that are done or cancelled, and any
+worktree no unfinished ticket uses, including those left by older versions.
+A blocked ticket keeps its worktree for `workspace.keep_blocked` (7 days by
+default). Branches always stay, so unblocking recreates the worktree.
+
+`amaru clean` does the same at once, also while the daemon runs;
+`--blocked` also deletes the worktrees of blocked tickets, and `--dry-run`
+lists what would go and how much space it takes.
+
 ## Direct pushes or a fork
 
 Without `fork`, branches are pushed to the repository itself. With

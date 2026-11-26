@@ -77,9 +77,14 @@ async fn removing_the_blocked_label_resumes_and_closing_cancels() {
     let ticket = fake.svc.store.open_ticket("me/app", 1).unwrap().unwrap();
     assert_eq!(ticket.fix_rounds, 0);
     settle(&scheduler).await;
+    let worktree = fake.svc.store.recent(1).unwrap()[0].worktree.clone();
+    let worktree = worktree.unwrap();
+    assert!(worktree.exists());
     fake.forge.update_issue(1, |i| i.open = false);
     settle(&scheduler).await;
     assert_eq!(states(&fake), [(1, State::Cancelled)]);
+    // The poll that cancels the ticket also deletes its worktree.
+    assert!(!worktree.exists());
 }
 
 #[tokio::test]
