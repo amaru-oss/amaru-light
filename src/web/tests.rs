@@ -58,6 +58,26 @@ async fn claims_lists_and_acts_on_tickets() {
 }
 
 #[tokio::test]
+async fn keeps_guidance_for_the_agent() {
+    let fake = Fake::new("").await;
+    let app = router(Arc::clone(&fake.svc), None);
+    let id = fake.claim(4).await.id;
+    let guide = format!("/api/tickets/{id}/guide");
+    let (status, _) = call(&app, post(&guide, r#"{"text":"  "}"#)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, body) = call(&app, post(&guide, r#"{"text":"use ring"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["state"], "QUEUED");
+    let pending = fake.svc.store.pending_guidance(id).unwrap();
+    assert_eq!(
+        (pending[0].by.as_str(), pending[0].text.as_str()),
+        ("web", "use ring")
+    );
+    let (status, _) = call(&app, post("/api/tickets/99/guide", r#"{"text":"x"}"#)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn reports_settings_and_serves_the_page() {
     let fake = Fake::new("").await;
     let app = router(Arc::clone(&fake.svc), None);

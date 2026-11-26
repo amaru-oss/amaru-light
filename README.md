@@ -65,6 +65,14 @@ through a fork often has none: then the daemon works without the labels,
 logs that it skipped them, and its comment on a blocked issue says to run
 `amaru unblock <ticket>` instead.
 
+When the agent is stuck, or going the wrong way, tell it what to do:
+`amaru guide <ticket> "the pr-build failure is a flaky test; mark it and move on"`,
+or the **Guide the agent** box on the ticket's web page. The directions go
+into the agent's own session, so it keeps everything it knew. A blocked
+ticket continues with them; a running agent is stopped and resumed with
+them; a ticket waiting for review runs a turn for them, the checks, and
+pushes again. The daemon acts on them at its next poll.
+
 ## Reviews
 
 After the pull request is open, the daemon polls it. Review comments,
@@ -131,6 +139,8 @@ amaru -c amaru.yaml drain owner/name --milestone "v1.2"
 amaru -c amaru.yaml status              # recent tickets
 amaru -c amaru.yaml status --ticket 7   # one ticket's events
 amaru -c amaru.yaml unblock 7
+amaru -c amaru.yaml guide 7 "skip the docs build; it needs network"
+amaru -c amaru.yaml guide 7 --file directions.md
 amaru -c amaru.yaml cancel 7
 ```
 

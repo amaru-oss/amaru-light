@@ -256,3 +256,75 @@ async fn blocks_before_any_agent_turn_when_the_fork_is_unusable() {
     assert!(fake.prompts().is_empty());
     assert!(!fake.repo_has("bot/app", "amaru/1-add-a-feature").await);
 }
+
+#[tokio::test]
+async fn guidance_resumes_a_blocked_ticket_in_its_session() {
+    let fake = Fake::new("test -f guided.txt").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::Blocked);
+    let guided = crate::actions::guide(&fake.svc, ticket.id, "Add guided.txt", "web")
+        .await
+        .unwrap();
+    assert_eq!(guided.state, State::Checking);
+    let ticket = drive(&fake, guided).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    let prompts = fake.prompts();
+    let turn = prompts
+        .iter()
+        .find(|p| p.contains("Add guided.txt"))
+        .unwrap();
+    assert!(turn.contains("stepped in on your work"));
+    assert!(turn.contains("still fails after 3 fix rounds"));
+    assert!(fake.resumed_every_turn_after_the_first());
+    assert!(
+        fake.svc
+            .store
+            .pending_guidance(ticket.id)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(fake.forge.state().prs.len(), 1);
+}
+
+#[tokio::test]
+async fn guidance_before_the_first_turn_goes_into_its_prompt() {
+    let fake = Fake::new("").await;
+    let ticket = fake.claim(1).await;
+    crate::actions::guide(&fake.svc, ticket.id, "Keep it small", "command line")
+        .await
+        .unwrap();
+    let ticket = drive(&fake, ticket).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    let prompts = fake.prompts();
+    assert!(prompts[0].contains("You are working on issue"));
+    assert!(prompts[0].contains("Keep it small"));
+    assert!(
+        fake.svc
+            .store
+            .pending_guidance(ticket.id)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn refuses_empty_guidance_and_finished_tickets() {
+    let fake = Fake::new("").await;
+    let ticket = fake.claim(1).await;
+    assert!(
+        crate::actions::guide(&fake.svc, ticket.id, " \n", "web")
+            .await
+            .is_err()
+    );
+    crate::actions::cancel(&fake.svc, ticket.id).unwrap();
+    assert!(
+        crate::actions::guide(&fake.svc, ticket.id, "go", "web")
+            .await
+            .is_err()
+    );
+    assert!(
+        crate::actions::guide(&fake.svc, 99, "go", "web")
+            .await
+            .is_err()
+    );
+}

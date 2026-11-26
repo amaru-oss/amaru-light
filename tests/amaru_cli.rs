@@ -40,7 +40,7 @@ fn lists_commands() {
     let (ok, text) = amaru(dir.path(), &["--help"]);
     assert!(ok);
     for command in [
-        "serve", "claim", "drain", "status", "unblock", "cancel", "doctor",
+        "serve", "claim", "drain", "status", "unblock", "guide", "cancel", "doctor",
     ] {
         assert!(text.contains(command), "{command}");
     }
@@ -58,6 +58,10 @@ fn reports_status_and_rejects_bad_input() {
     assert!(!ok && text.contains("not a configured project"), "{text}");
     let (ok, text) = amaru(dir.path(), &["cancel", "99"]);
     assert!(!ok && text.contains("no such ticket"), "{text}");
+    let (ok, text) = amaru(dir.path(), &["guide", "99", "use", "ring"]);
+    assert!(!ok && text.contains("no such ticket"), "{text}");
+    let (ok, text) = amaru(dir.path(), &["guide", "99", "--file", "missing.md"]);
+    assert!(!ok && text.contains("cannot read missing.md"), "{text}");
 }
 
 #[test]

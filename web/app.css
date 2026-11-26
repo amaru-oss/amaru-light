@@ -445,3 +445,26 @@ pre {
   .row { grid-template-columns: minmax(0, 1fr) auto; }
   .row .id { display: none; }
 }
+
+/* Guidance for the agent */
+
+.guide { padding: 14px 16px; margin: 20px 0 0; }
+.guide label { display: block; }
+.guide-title { display: block; font-weight: 600; margin-bottom: 8px; }
+.guide textarea {
+  font: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+}
+.guide-foot { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin-top: 10px; }
+.guide-note { margin: 0; font-size: 13px; color: var(--muted); }
+.guide-note .bad { color: var(--warn); }
+.ev.guidance .body { font-weight: 600; }
+.ev.guidance .body pre { white-space: pre-wrap; font-weight: 400; }
+.ev.guidance .dot::after { border-color: var(--accent); background: var(--accent); }

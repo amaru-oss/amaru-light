@@ -63,17 +63,58 @@ pub async fn claim(svc: &Services, reference: &str) -> Result<Claimed> {
 
 /// Let a blocked ticket continue from the step where it stopped.
 pub async fn resume(svc: &Services, id: i64) -> Result<Ticket> {
-    let mut ticket = svc.store.get(id)?.context("no such ticket")?;
+    let ticket = svc.store.get(id)?.context("no such ticket")?;
     if ticket.state != State::Blocked {
         bail!("ticket {id} is {}, not blocked", ticket.state);
     }
+    reopen(svc, ticket).await
+}
+
+async fn reopen(svc: &Services, mut ticket: Ticket) -> Result<Ticket> {
     svc.source
         .remove_label(&ticket.repo, ticket.number, BLOCKED_LABEL)
         .await?;
     unblock(&mut ticket);
     svc.store.save(&ticket)?;
-    svc.store
-        .event(id, "UNBLOCKED", &serde_json::json!({ "to": ticket.state }))?;
+    svc.store.event(
+        ticket.id,
+        "UNBLOCKED",
+        &serde_json::json!({ "to": ticket.state }),
+    )?;
+    Ok(ticket)
+}
+
+/// Longest guidance the daemon accepts, in bytes.
+pub const MAX_GUIDANCE: usize = 20_000;
+
+/// Give the ticket's agent directions in its own session. A blocked ticket
+/// continues at once; a running agent is stopped and resumed with the
+/// guidance; a ticket waiting for review runs a turn for it and pushes.
+/// The daemon acts on it at its next poll.
+pub async fn guide(svc: &Services, id: i64, text: &str, by: &str) -> Result<Ticket> {
+    let text = text.trim();
+    if text.is_empty() {
+        bail!("write what the agent should do");
+    }
+    if text.len() > MAX_GUIDANCE {
+        bail!("guidance is limited to {MAX_GUIDANCE} bytes");
+    }
+    let ticket = svc.store.get(id)?.context("no such ticket")?;
+    if ticket.state.is_terminal() {
+        bail!("ticket {id} is already {}", ticket.state);
+    }
+    let stopped = (ticket.state == State::Blocked)
+        .then(|| ticket.reason.clone())
+        .flatten();
+    svc.store.add_guidance(id, by, text, stopped.as_deref())?;
+    svc.store.event(
+        id,
+        "GUIDANCE",
+        &serde_json::json!({ "by": by, "text": text, "state": ticket.state }),
+    )?;
+    if ticket.state == State::Blocked {
+        return reopen(svc, ticket).await;
+    }
     Ok(ticket)
 }
 

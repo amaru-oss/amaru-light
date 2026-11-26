@@ -12,7 +12,9 @@ offers the same actions as the command line:
   blocked, and a timeline of everything the daemon and the agent did: state
   changes, the agent's messages and commands, failed checks, errors. The
   timeline follows new events as they arrive. **Unblock** and **Cancel** do
-  what `amaru unblock` and `amaru cancel` do.
+  what `amaru unblock` and `amaru cancel` do. **Guide the agent** sends it
+  free-form directions, as `amaru guide` does (Ctrl+Enter or Cmd+Enter
+  sends); the timeline shows them and when the agent received them.
 - **Projects**: the settings of each project file, read only. Edit the files
   and restart the daemon to change them.
 - **Agents**: whether each agent CLI is signed in, and signing it in. See
@@ -138,6 +140,7 @@ something are `POST` requests and must carry an `X-Amaru-Action` header
 | `GET /api/tickets/{id}` | One ticket. |
 | `GET /api/tickets/{id}/events?after={event id}` | Its events, oldest first. |
 | `POST /api/tickets/{id}/unblock` | Let a blocked ticket continue. |
+| `POST /api/tickets/{id}/guide` `{"text": "..."}` | Give the ticket's agent directions; see `amaru guide`. |
 | `POST /api/tickets/{id}/cancel` | Cancel a ticket. |
 | `GET /api/agents` | The agents and their latest sign-in. |
 | `GET /api/agents/{name}/status` | Run the agent's status command. |

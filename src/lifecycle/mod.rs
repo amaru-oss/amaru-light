@@ -1,6 +1,7 @@
 //! The ticket lifecycle: from a claimed issue to a pull request that a
 //! human merges, with review feedback handled in the same agent session.
 
+mod guide;
 mod review;
 mod steps;
 mod turn;
@@ -180,17 +181,36 @@ impl<'a> Job<'a> {
     pub async fn drive(&mut self) -> Result<()> {
         while self.ticket.state.needs_slot() {
             if self.is_cancelled() {
-                return self.transition(State::Cancelled);
+                return self.halt();
             }
             if let Err(e) = self.ensure_worktree().await {
                 return self.stop(e).await;
             }
-            match self.step().await {
+            let result = if self.wants_guidance_turn()? {
+                self.follow_guidance().await
+            } else {
+                self.step().await
+            };
+            match result {
                 Ok(next) => self.transition(next)?,
+                Err(_) if self.is_cancelled() => return self.halt(),
                 Err(e) => self.stop(e).await?,
             }
         }
         Ok(())
+    }
+
+    /// The job was told to stop. Either the ticket was cancelled, or new
+    /// guidance came for its agent: then the job ends where it is, and the
+    /// scheduler starts it again on its next poll with the guidance first.
+    fn halt(&mut self) -> Result<()> {
+        let stored = self.svc.store.get(self.ticket.id)?;
+        let cancelled = stored.is_none_or(|t| t.state == State::Cancelled);
+        if !cancelled && !self.pending_guidance()?.is_empty() {
+            self.log("stopped the agent to give it the operator's guidance");
+            return self.event("INTERRUPTED", &json!({ "for": "guidance" }));
+        }
+        self.transition(State::Cancelled)
     }
 
     /// Recreate a missing worktree (after cleanup or on a new machine).

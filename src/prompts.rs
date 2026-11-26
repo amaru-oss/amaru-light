@@ -6,8 +6,9 @@
 use crate::contract;
 use std::path::PathBuf;
 
-const BUILT_IN: [(&str, &str); 8] = [
+const BUILT_IN: [(&str, &str); 9] = [
     ("continue", include_str!("../prompts/continue.md")),
+    ("guide", include_str!("../prompts/guide.md")),
     ("implement", include_str!("../prompts/implement.md")),
     ("fix_checks", include_str!("../prompts/fix_checks.md")),
     ("self_review", include_str!("../prompts/self_review.md")),

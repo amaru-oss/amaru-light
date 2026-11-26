@@ -31,6 +31,7 @@ pub(super) fn routes() -> Router<Web> {
         .route("/api/tickets/{id}", get(ticket))
         .route("/api/tickets/{id}/events", get(events))
         .route("/api/tickets/{id}/unblock", post(unblock))
+        .route("/api/tickets/{id}/guide", post(guide))
         .route("/api/tickets/{id}/cancel", post(cancel))
 }
 
@@ -208,5 +209,22 @@ async fn unblock(State(web): State<Web>, Path(id): Path<i64>) -> ApiResult<Ticke
 async fn cancel(State(web): State<Web>, Path(id): Path<i64>) -> ApiResult<TicketView> {
     load(&web, id)?;
     actions::cancel(&web.svc, id).map_err(|e| ApiError::rejected(&e))?;
+    Ok(Json(load(&web, id)?))
+}
+
+#[derive(Debug, Deserialize)]
+struct GuideBody {
+    text: String,
+}
+
+async fn guide(
+    State(web): State<Web>,
+    Path(id): Path<i64>,
+    Json(body): Json<GuideBody>,
+) -> ApiResult<TicketView> {
+    load(&web, id)?;
+    actions::guide(&web.svc, id, &body.text, "web")
+        .await
+        .map_err(|e| ApiError::rejected(&e))?;
     Ok(Json(load(&web, id)?))
 }
