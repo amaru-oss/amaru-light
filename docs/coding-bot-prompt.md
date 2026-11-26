@@ -52,7 +52,7 @@ for my answers:
 1. The repository the bot works on (`owner/name`) and its base branch.
 2. The bot's GitHub login. It should be a separate account, not mine.
 3. Fork or direct push. Fork: the bot pushes to its own fork
-   (`bot/name`, which must exist) and needs no write access upstream.
+   (`bot/name`; the daemon creates it when it is missing) and needs no write access upstream.
    Direct: the bot pushes to the repository and needs write access.
 4. The bot's access to the repository: none, triage (organizations only)
    or write. Without it the bot cannot add its `amaru:working` and

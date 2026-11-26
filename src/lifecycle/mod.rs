@@ -7,7 +7,7 @@ mod turn;
 
 use crate::{
     db::{Store, now},
-    forge::{Forge, Target, TicketSource},
+    forge::{Forge, ForkError, Target, TicketSource},
     process::Cancel,
     prompts::Prompts,
     settings::{ProjectSettings, Settings},
@@ -101,6 +101,41 @@ impl<'a> Job<'a> {
             upstream: self.project.repo.clone(),
             fork: self.project.fork.clone(),
         }
+    }
+
+    /// Make sure the project's fork exists, creating it when it is missing.
+    /// The daemon decides this, never the agent: a fork it cannot use stops
+    /// the ticket with the reason.
+    async fn ensure_fork(&self) -> Result<()> {
+        let target = self.target();
+        match self.svc.forge.ensure_fork(&target).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.is::<ForkError>() => Err(blocked(format!("{e:#}"))),
+            Err(e) => {
+                let fork = target.fork.unwrap_or_default();
+                Err(e.context(format!("cannot make sure the fork {fork} exists")))
+            }
+        }
+    }
+
+    /// Make sure the fork exists and the clone and the ticket's worktree have
+    /// `origin` = where branches are pushed and `upstream` = the repository
+    /// pull requests go to. Runs before every agent turn and every push, so
+    /// whatever the agent did to the remotes, the work goes to the same place.
+    async fn ensure_remotes(&self) -> Result<()> {
+        self.ensure_fork().await?;
+        let target = self.target();
+        let worktree = self.ticket.worktree.as_deref();
+        self.svc
+            .workspace
+            .ensure_remotes(&target, worktree)
+            .await
+            .map_err(|e| {
+                blocked(format!(
+                    "cannot set the git remotes of {}: {e:#}",
+                    target.upstream
+                ))
+            })
     }
 
     fn worktree(&self) -> Result<PathBuf> {

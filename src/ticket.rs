@@ -180,7 +180,7 @@ impl Ticket {
         Some(if self.stacked_on.is_some() {
             base.to_owned()
         } else {
-            format!("origin/{base}")
+            format!("upstream/{base}")
         })
     }
 
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(slug("???"), "work");
         let mut t = Ticket::new(1, "me/a".into(), 1, "t".into(), Origin::Manual);
         t.base = Some("main".into());
-        assert_eq!(t.base_ref().as_deref(), Some("origin/main"));
+        assert_eq!(t.base_ref().as_deref(), Some("upstream/main"));
         t.stacked_on = Some(3);
         t.base = Some("amaru/3-x".into());
         assert_eq!(t.base_ref().as_deref(), Some("amaru/3-x"));

@@ -15,6 +15,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "amaru-light"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "clap",
+ "nix",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -554,25 +573,6 @@ name = "mime"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5848f5a9e8117cf94f2f90faac24a87ff81600ff8628c1e3deaab572e76bfa1"
-
-[[package]]
-name = "amaru-light"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "clap",
- "nix",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "tokio",
- "tower",
-]
 
 [[package]]
 name = "mio"

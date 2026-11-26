@@ -135,7 +135,7 @@ workspace:
 | --- | --- | --- |
 | `repo` | required | `owner/name` of the repository whose issues the bot works on and where pull requests are opened. No trailing slash. |
 | `base_branch` | `main` | The branch that ticket branches start from and target. |
-| `fork` | none | `owner/name` of the bot's fork. When set, branches are pushed there and pull requests come from `owner:branch`. When not set, branches are pushed to `repo` itself. See [GitHub access](github-access.md). |
+| `fork` | none | `owner/name` of the bot's fork. When set, the daemon creates the fork if it is missing, branches are pushed there and pull requests come from `owner:branch`. When not set, branches are pushed to `repo` itself. See [GitHub access](github-access.md). |
 | `branch_prefix` | `amaru/` | Ticket branches are `<prefix><issue>-<slug>`, for example `amaru/42-fix-the-export-button` or, for a Jira issue, `amaru/CAMEL-12345-fix-the-export-button`. Include the separator, `/` or `-`, in the prefix. |
 | `agent` | required | A name from `agents:` in the daemon file. |
 | `step_timeout` | `45m` | The longest one agent turn may run. |

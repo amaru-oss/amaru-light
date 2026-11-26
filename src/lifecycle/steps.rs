@@ -60,6 +60,7 @@ impl Job<'_> {
 
     pub(super) async fn create_worktree(&mut self) -> Result<State> {
         let target = self.target();
+        self.ensure_fork().await?;
         self.log(&format!("syncing {}", target.upstream));
         self.svc.workspace.sync(&target).await?;
         let branch = self.ticket.branch.clone().context("ticket has no branch")?;
@@ -225,6 +226,7 @@ impl Job<'_> {
             .await?;
         let target = self.target();
         let branch = self.ticket.branch.clone().context("ticket has no branch")?;
+        self.ensure_remotes().await?;
         self.svc
             .workspace
             .push(&self.worktree()?, &target, &branch)

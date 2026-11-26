@@ -211,3 +211,48 @@ async fn a_silent_agent_is_stopped_and_retried_in_its_session() {
     assert_eq!(ticket.state, State::AwaitingReview);
     assert!(fake.resumed_every_turn_after_the_first());
 }
+
+const FORK: &str = "fork: bot/app\n";
+
+#[tokio::test]
+async fn creates_the_fork_and_pushes_only_there() {
+    let fake = Fake::with_project("", FORK).await;
+    // The agent points the remotes elsewhere; the daemon puts them back.
+    std::fs::write(fake.dir.path().join("agent/tamper"), "").unwrap();
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    let branch = "amaru/1-add-a-feature";
+    assert!(fake.repo_has("bot/app", branch).await);
+    assert!(!fake.upstream_has(branch).await);
+    let forge = fake.forge.state();
+    assert_eq!(forge.forks_created, ["bot/app"]);
+    assert_eq!(forge.heads, [format!("bot:{branch}")]);
+    // Before the worktree, before the agent's turn and before the push.
+    assert!(forge.fork_checks >= 3, "{}", forge.fork_checks);
+}
+
+#[tokio::test]
+async fn a_jira_ticket_goes_through_the_fork_too() {
+    let extra = format!("{FORK}jira: {{url: \"https://jira.example.com\", project: APP}}\n");
+    let fake = Fake::with_project("", &extra).await;
+    fake.forge.update_issue(1, |i| i.key = Some("APP-1".into()));
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::AwaitingReview);
+    let branch = "amaru/APP-1-add-a-feature";
+    assert!(fake.repo_has("bot/app", branch).await);
+    assert!(!fake.upstream_has(branch).await);
+    let forge = fake.forge.state();
+    assert_eq!(forge.forks_created, ["bot/app"]);
+    assert_eq!(forge.heads, [format!("bot:{branch}")]);
+}
+
+#[tokio::test]
+async fn blocks_before_any_agent_turn_when_the_fork_is_unusable() {
+    let fake = Fake::with_project("", FORK).await;
+    fake.forge.state().fork_unusable = true;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.state, State::Blocked);
+    assert!(ticket.reason.unwrap_or_default().contains("not a fork"));
+    assert!(fake.prompts().is_empty());
+    assert!(!fake.repo_has("bot/app", "amaru/1-add-a-feature").await);
+}
