@@ -26,7 +26,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 # The tools that the image must contain, run without the entrypoint.
-for tool in "git --version" "gh --version" "curl --version" "node --version" "npm --version" "ripwire --version" "/app/bin/amaru --version"; do
+for tool in "git --version" "gh --version" "curl --version" "node --version" "npm --version" "ripwire --version" "amaru-guard --version" "/app/bin/amaru --version"; do
     # shellcheck disable=SC2086
     "$RUNTIME" run --rm --entrypoint "" "$image" $tool >/dev/null \
         || fail "'$tool' does not run in the image"
@@ -37,6 +37,9 @@ done
 "$RUNTIME" run -d --name "$name" --entrypoint /bin/sh "$image" -c '
     sed -e "s|^state_dir: .*|state_dir: /data|" -e "s|^  listen: 127.0.0.1:|  listen: 0.0.0.0:|" \
         /app/examples/daemon.yaml > /config/amaru.yaml
+    # The guard downloads its model at the first start; the smoke test
+    # checks the daemon without it.
+    echo "guard: {enabled: false}" >> /config/amaru.yaml
     cp /app/examples/project.yaml /config/project.yaml
     exec /app/entrypoint --config /config/amaru.yaml serve' >/dev/null
 

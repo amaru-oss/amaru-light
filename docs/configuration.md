@@ -54,6 +54,7 @@ projects:
 | `web.listen` | `127.0.0.1:8765` | The address and port of the web interface. Use `0.0.0.0:8765` in a container, and set `AMARU_WEB_TOKEN` when anyone else can reach the port. |
 | `agents` | required | The agent CLIs, by a name of your choice. Projects refer to that name. |
 | `projects` | required | The project files. |
+| `guard` | on | The [prompt guard](prompt-guard.md): `enabled`, `command`, `config`, `inputs`, `on_error`, `timeout`. |
 
 ### Agents
 
@@ -167,6 +168,25 @@ is already there and exit 0.
 A failed step is reported on stderr (`setup <agent>: failed: ...`) and the
 daemon starts anyway; the next start tries again. A missing `instructions`
 file or an empty `setup` entry is an error when the settings load.
+
+### Prompt guard
+
+The guard checks issue text and review feedback with a local prompt
+injection classifier before an agent reads them. It is on unless the daemon
+file turns it off:
+
+```yaml
+guard:
+  enabled: true             # the default; `false` turns it off
+  command: amaru-guard
+  config: guard.yaml        # the guard's own settings; optional
+  inputs: [issue, review]   # add `checks` for failed check output
+  on_error: block           # or `allow`
+  timeout: 15m
+```
+
+The first start downloads the model. See [The prompt guard](prompt-guard.md)
+for every key and for what happens to flagged text.
 
 ## The project file
 

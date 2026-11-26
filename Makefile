@@ -41,10 +41,10 @@ fmt-check:
 	$(CARGO) fmt --all -- --check
 
 clippy:
-	$(CARGO) clippy --locked --all-targets -- -D warnings
+	$(CARGO) clippy --locked --workspace --all-targets -- -D warnings
 
 test:
-	$(CARGO) test --locked
+	$(CARGO) test --locked --workspace
 
 doctor:
 	$(CARGO) run --locked --bin amaru -- -c "$(CONFIG)" doctor
