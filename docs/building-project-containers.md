@@ -75,6 +75,10 @@ IBM Bob Shell (`@ibm/bob`, command `bob`) installs the same way, with
 `npm install -g @ibm/bob`. IBM's
 [install guide](https://bob.ibm.com/docs/shell/getting-started/install-and-setup)
 asks for Node.js 24; the package itself declares Node.js 22.15 or later.
+Its IBM license (`dist/ibm-licence/license.txt` in the package) lets you
+install copies for your own use but grants no right to redistribute the
+program, so keep an image with Bob in it to yourself: do not push it to a
+public registry.
 
 Only copy the files the image needs. Add a `.containerignore` if the context
 contains a checkout, dependency caches, local environment files, or other
