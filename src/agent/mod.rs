@@ -154,6 +154,8 @@ mod tests {
             login: None,
             login_with_key: None,
             login_status: None,
+            setup: Vec::new(),
+            instructions: None,
         })
     }
 

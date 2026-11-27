@@ -11,6 +11,8 @@ fn shell(login: &str, status: &str) -> AgentSettings {
         login: Some(vec!["-c".to_owned(), login.to_owned()]),
         login_with_key: None,
         login_status: Some(vec!["-c".to_owned(), status.to_owned()]),
+        setup: Vec::new(),
+        instructions: None,
     }
 }
 

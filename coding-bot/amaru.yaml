@@ -16,12 +16,19 @@ agents:
     # The container is the sandbox, and cargo needs the network, so Codex
     # runs without approvals and without its own sandbox.
     args: [--dangerously-bypass-approvals-and-sandbox]
+    # Run at every start, into the home volume; each step is safe to repeat.
+    setup:
+      - [plugin, marketplace, add, Open-Harness-Engineering/ai-agents-oss-helper]
+      - [plugin, add, oss-helper@ai-agents-oss-helper]
   # Claude Code is installed too. To use it, add it here and set
   # `agent: claude` in project.yaml, then rebuild the image.
   # claude:
   #   driver: claude
   #   command: claude
   #   args: [--permission-mode, bypassPermissions]
+  #   setup:
+  #     - [plugin, marketplace, add, Open-Harness-Engineering/ai-agents-oss-helper]
+  #     - [plugin, install, oss-helper@ai-agents-oss-helper]
 
 projects:
   - project.yaml
