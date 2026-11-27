@@ -223,11 +223,17 @@ pub struct Readiness {
     pub checked_at: String,
 }
 
-/// Ask the agent CLI whether it is signed in. An agent whose status command
-/// is turned off is taken to be ready; one whose status command fails,
+/// Ask the agent CLI whether it is signed in. A CLI that is not installed is
+/// not ready; an installed one whose status command is turned off is; one whose status command fails,
 /// cannot run or does not answer is not, because its turns would fail too.
 pub async fn readiness(agent: &AgentSettings) -> Readiness {
-    let (ready, detail) = if agent.status_args().is_empty() {
+    let (ready, detail) = if !crate::install::installed(agent) {
+        let detail = format!(
+            "{} is not installed; install it on the Agents page",
+            agent.command
+        );
+        (false, detail)
+    } else if agent.status_args().is_empty() {
         (true, "no status command is set".to_owned())
     } else {
         let found = status(agent).await;
