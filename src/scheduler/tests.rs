@@ -174,3 +174,73 @@ async fn guidance_stops_a_running_agent_and_restarts_it_with_the_guidance() {
     assert_eq!(prompts.len(), 2);
     assert!(prompts[1].contains("Try the other way"));
 }
+
+fn sign_out(fake: &Fake, out: bool) {
+    let flag = fake.dir.path().join("agent/signed-out");
+    if out {
+        std::fs::write(flag, "").unwrap();
+    } else {
+        std::fs::remove_file(flag).unwrap();
+    }
+}
+
+fn kinds(fake: &Fake, id: i64) -> Vec<String> {
+    let events = fake.svc.store.events(id, 0).unwrap();
+    events.into_iter().map(|e| e.kind).collect()
+}
+
+#[tokio::test]
+async fn claims_nothing_while_the_agent_is_signed_out() {
+    let fake = Fake::new("").await;
+    fake.forge.update_issue(1, |_| {});
+    sign_out(&fake, true);
+    let scheduler = scheduler(&fake, Intake::Autonomous);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), []);
+    assert!(fake.prompts().is_empty());
+    assert!(!fake.svc.sign_ins.ready("claude"));
+    let found = &fake.svc.sign_ins.all()["claude"];
+    assert!(found.detail.contains("Not logged in"), "{}", found.detail);
+    sign_out(&fake, false);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
+}
+
+#[tokio::test]
+async fn a_claimed_ticket_waits_for_the_agent_to_sign_in() {
+    let fake = Fake::new("").await;
+    let ticket = fake.claim(1).await;
+    sign_out(&fake, true);
+    let scheduler = scheduler(&fake, Intake::Manual);
+    for _ in 0..3 {
+        settle(&scheduler).await;
+    }
+    assert_eq!(states(&fake), [(1, State::Queued)]);
+    assert!(fake.prompts().is_empty());
+    assert!(!kinds(&fake, ticket.id).contains(&"ERROR".to_owned()));
+    sign_out(&fake, false);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
+}
+
+#[tokio::test]
+async fn signing_out_during_a_turn_does_not_count_as_an_error() {
+    let fake = Fake::new("").await;
+    fake.forge.update_issue(1, |_| {});
+    std::fs::write(fake.dir.path().join("agent/sign-out-now"), "").unwrap();
+    let scheduler = scheduler(&fake, Intake::Autonomous);
+    for _ in 0..4 {
+        settle(&scheduler).await;
+    }
+    let ticket = fake.svc.store.open_ticket("me/app", 1).unwrap().unwrap();
+    assert_ne!(ticket.state, State::Blocked);
+    let kinds = kinds(&fake, ticket.id);
+    assert!(
+        kinds.contains(&"WAITING_FOR_SIGN_IN".to_owned()),
+        "{kinds:?}"
+    );
+    assert!(!kinds.contains(&"ERROR".to_owned()), "{kinds:?}");
+    sign_out(&fake, false);
+    settle(&scheduler).await;
+    assert_eq!(states(&fake), [(1, State::AwaitingReview)]);
+}

@@ -294,10 +294,21 @@ async fn doctor(config: &std::path::Path) -> Result<()> {
     ok &= probe("gh", &settings.daemon.gh, &["auth", "status"]).await;
     for (name, agent) in &settings.daemon.agents {
         ok &= probe(&format!("agent {name}"), &agent.command, &["--version"]).await;
+        ok &= signed_in(name, agent).await;
     }
     ok &= check_jira(&settings).await;
     if !ok {
         bail!("some checks failed");
     }
     Ok(())
+}
+
+/// Whether the agent CLI is signed in: the daemon takes no work for it
+/// while it is not.
+async fn signed_in(name: &str, agent: &amaru_light::settings::AgentSettings) -> bool {
+    let found = amaru_light::login::readiness(agent).await;
+    let detail = found.detail.lines().next().unwrap_or_default();
+    let mark = if found.ready { "ok  " } else { "FAIL" };
+    println!("{mark}  agent {name} sign-in: {detail}");
+    found.ready
 }

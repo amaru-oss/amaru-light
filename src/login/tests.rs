@@ -123,3 +123,37 @@ fn cleans_terminal_output() {
     assert_eq!(clean(raw), "Open link now\nspin\ndone");
     assert_eq!(tail("héllo", 4), "llo");
 }
+
+#[tokio::test]
+async fn an_agent_is_ready_only_when_signed_in() {
+    let signed_in = readiness(&shell("true", "echo 'Logged in'")).await;
+    assert!(signed_in.ready);
+    assert_eq!(signed_in.detail, "Logged in");
+    let signed_out = readiness(&shell("true", "echo 'Not logged in'; exit 1")).await;
+    assert!(!signed_out.ready);
+    assert_eq!(signed_out.detail, "Not logged in");
+    let mut missing = shell("true", "true");
+    missing.command = "/nonexistent/agent".to_owned();
+    assert!(!readiness(&missing).await.ready);
+    let mut unchecked = shell("true", "exit 1");
+    unchecked.login_status = Some(Vec::new());
+    assert!(readiness(&unchecked).await.ready);
+}
+
+#[tokio::test]
+async fn sign_ins_report_only_changes() {
+    let sign_ins = SignIns::default();
+    let found = |ready| Readiness {
+        ready,
+        detail: String::new(),
+        checked_at: String::new(),
+    };
+    assert!(sign_ins.ready("codex"));
+    assert!(!sign_ins.record("codex", found(true)));
+    assert!(sign_ins.record("codex", found(false)));
+    assert!(!sign_ins.record("codex", found(false)));
+    assert!(!sign_ins.ready("codex"));
+    assert!(sign_ins.record("codex", found(true)));
+    assert!(sign_ins.record("claude", found(false)));
+    assert_eq!(sign_ins.all().len(), 2);
+}

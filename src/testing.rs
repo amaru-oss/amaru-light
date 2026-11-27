@@ -24,11 +24,19 @@ use std::{
 
 /// Answers like Claude Code and acts on the kind of prompt it receives.
 const AGENT: &str = r#"#!/bin/sh
-prompt=$(cat)
 dir=$(dirname "$0")
+if [ "$1 $2" = "auth status" ]; then
+  if [ -f "$dir/signed-out" ]; then echo "Not logged in"; exit 1; fi
+  echo "Logged in"; exit 0
+fi
+prompt=$(cat)
 n=$(ls "$dir"/prompt-* 2>/dev/null | wc -l)
 printf '%s' "$prompt" > "$dir/prompt-$n"
 echo "$*" > "$dir/args-$n"
+if [ -f "$dir/sign-out-now" ]; then
+  rm "$dir/sign-out-now"; touch "$dir/signed-out"
+  echo "Not logged in" >&2; exit 1
+fi
 if [ -f "$dir/stall" ]; then
   rm "$dir/stall"
   echo '{"type":"system","subtype":"init","session_id":"sess-1"}'
@@ -343,6 +351,7 @@ impl Fake {
             source: forge.clone(),
             forge: forge.clone(),
             prompts: Prompts::default(),
+            sign_ins: crate::login::SignIns::default(),
         });
         Self { dir, forge, svc }
     }

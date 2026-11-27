@@ -4,6 +4,7 @@ use super::{Cancelled, Job, blocked};
 use crate::{
     agent::{Agent, AgentEvent, Turn, TurnResult, Workplace},
     contract::{self, Report},
+    login,
     process::Exit,
     process::tail,
 };
@@ -135,18 +136,40 @@ impl Job<'_> {
         ))
     }
 
+    /// After a failed turn, ask the CLI whether it is still signed in. A
+    /// signed-out agent is not the ticket's fault: the error is not a block,
+    /// and the scheduler starts the ticket again once the agent signs in.
+    async fn signed_in(&self, agent: &str, result: &TurnResult) -> Result<()> {
+        if result.succeeded() || result.exit == Some(Exit::Cancelled) {
+            return Ok(());
+        }
+        let found = login::readiness(self.svc.settings.agent(agent)?).await;
+        if found.ready {
+            return Ok(());
+        }
+        let detail = found.detail.lines().next().unwrap_or_default().to_owned();
+        self.svc.sign_ins.record(agent, found);
+        self.event(
+            "AGENT_SIGNED_OUT",
+            &json!({ "agent": agent, "detail": detail }),
+        )?;
+        anyhow::bail!("agent {agent} is not signed in: {detail}")
+    }
+
     async fn attempt(&mut self, agent: &str, prompt: &str, mode: Session) -> Result<TurnResult> {
         let session = match mode {
             Session::Ticket => self.ticket.session_id.clone(),
             Session::Separate => None,
         };
         let mut result = self.run_agent(agent, prompt, session.as_deref()).await?;
+        self.signed_in(agent, &result).await?;
         let lost_session =
             session.is_some() && !result.succeeded() && result.exit == Some(Exit::Code(1));
         if lost_session {
             self.event("SESSION_LOST", &json!({ "stderr": result.stderr }))?;
             let fresh = self.context_pack(prompt).await?;
             result = self.run_agent(agent, &fresh, None).await?;
+            self.signed_in(agent, &result).await?;
         }
         // Keep the session even when the turn failed: whatever runs next,
         // a retry or a human unblock, resumes the session the agent was in.
@@ -210,6 +233,7 @@ impl Job<'_> {
                     .render("missing_result", &[("error", &format!("{error:#}"))]);
                 let session = first.session_id.clone();
                 let retry = self.run_agent(agent, &ask, session.as_deref()).await?;
+                self.signed_in(agent, &retry).await?;
                 if !retry.succeeded() {
                     return Err(blocked(format!(
                         "the agent did not report its result: {error:#}"

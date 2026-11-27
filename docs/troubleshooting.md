@@ -119,6 +119,16 @@ most builds need.
 runs the daemon, from that user's `PATH`. Sign in to the CLI as that user:
 `claude` then `/login`, or `codex login --device-auth`.
 
+**The log says `agent codex is not signed in, so no work is claimed or
+started for it until it is`.** Every poll runs each agent's status command
+(`login_status`), and while it fails the daemon claims no issue and starts
+no ticket for the projects that use that agent. Tickets already claimed
+wait where they are, without counting errors, and a turn that fails because
+the agent signed out midway waits the same way. Sign the agent in, from the
+web page's Agents tab or a shell; the next poll picks the work up again. The
+Tickets page shows a notice while a project waits. An agent with
+`login_status: []` is never checked and is always taken to be signed in.
+
 **A ticket blocks with `the agent did not report its result`.** The agent
 ended its turn without writing the result file, `.amaru/result.json`, even
 after a reminder. Read its last messages with `amaru status --ticket <id>`,
@@ -129,8 +139,9 @@ then `amaru unblock <id>`.
 `amaru unblock <id>`: the next turn resumes the same session.
 
 **A ticket blocks with `the agent failed: ...`.** The CLI exited with an
-error, for example a usage limit or an expired login. The reason holds the
-end of its output.
+error, for example a usage limit. The reason holds the end of its output.
+An expired login does not block the ticket: the daemon asks the CLI whether
+it is still signed in, and when it is not the ticket waits for a sign-in.
 
 **The log says `the agent made no progress for 1800s and was stopped`.** The
 agent CLI printed nothing but retry notices for `idle_timeout`, often because

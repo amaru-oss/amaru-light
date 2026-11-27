@@ -8,6 +8,7 @@ use crate::{
         jira::{Curl, Jira},
     },
     lifecycle::Services,
+    login::SignIns,
     prompts::Prompts,
     settings::Settings,
     worktree::Workspace,
@@ -36,6 +37,7 @@ pub fn services(config: &Path) -> Result<Arc<Services>> {
         source: Arc::new(trackers),
         forge: github,
         settings: Arc::new(settings),
+        sign_ins: SignIns::default(),
     }))
 }
 

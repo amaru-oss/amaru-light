@@ -141,6 +141,7 @@ let filter = storage("get", "amaru-filter") || "all";
 
 async function showTickets() {
   const message = h("div");
+  const paused = h("div");
   const counts = h("div", { class: "counts" });
   const list = h("div", { class: "card list" }, h("div", { class: "empty" }, "Loading…"));
   const input = h("input", {
@@ -154,15 +155,28 @@ async function showTickets() {
       h("div", {}, h("h1", {}, "Tickets"),
         h("p", { class: "sub" }, "Issues the daemon is working on, newest first.")),
       form),
-    message, counts, list);
+    paused, message, counts, list);
 
   const refresh = async () => {
-    const tickets = await api("/api/tickets?limit=300");
+    const [tickets, about] = await Promise.all([api("/api/tickets?limit=300"), api("/api/info")]);
+    drawPaused(paused, about);
     drawCounts(counts, tickets, () => drawList(list, tickets));
     drawList(list, tickets);
   };
   await refresh().catch(handle(list));
   schedule(refresh, LIST_EVERY);
+}
+
+// Projects whose agent is signed out: the daemon takes no work for them.
+function drawPaused(container, about) {
+  const waiting = about.projects.filter((p) => p.waiting_for_sign_in.length);
+  container.replaceChildren(...waiting.map((p) => {
+    const names = p.waiting_for_sign_in.join(" and ");
+    const verb = p.waiting_for_sign_in.length === 1 ? "is" : "are";
+    return h("p", { class: "notice bad" },
+      `Not taking work for ${p.repo}: agent ${names} ${verb} not signed in. `,
+      "Sign in on the ", h("a", { href: "#/agents" }, "Agents"), " page; the daemon picks work up again on its next poll.");
+  }));
 }
 
 function drawCounts(container, tickets, redraw) {
@@ -485,7 +499,9 @@ async function showProjects() {
     h("div", { class: "facts" }, h("dl", {},
       fact("Base branch", h("code", {}, p.base_branch)),
       fact("Tickets from", p.jira ? `Jira ${p.jira}` : "GitHub issues"),
-      fact("Agent", p.agent),
+      fact("Agent", p.waiting_for_sign_in.length
+        ? [p.agent, " ", h("span", { class: "state blocked" }, `${p.waiting_for_sign_in.join(", ")} not signed in`)]
+        : p.agent),
       fact("Picks up labels", p.labels.length ? p.labels.map((l) => h("span", { class: "tag" }, l)) : "—"),
       fact("Picks up assignee", p.assignee || "—"),
       fact("Checks", p.checks.length ? p.checks.map((c) => h("span", { class: "tag" }, c)) : "—"),

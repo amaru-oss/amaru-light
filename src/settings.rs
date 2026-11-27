@@ -437,6 +437,19 @@ pub struct ProjectSettings {
 }
 
 impl ProjectSettings {
+    /// The agents this project runs: its own, and the reviewer of an
+    /// `other_agent` self-review.
+    pub fn agents(&self) -> Vec<&str> {
+        let mut names = vec![self.agent.as_str()];
+        if self.review.self_review == SelfReview::OtherAgent
+            && let Some(reviewer) = self.review.reviewer_agent.as_deref()
+            && reviewer != self.agent
+        {
+            names.push(reviewer);
+        }
+        names
+    }
+
     /// How people name an issue: `CAMEL-12345` or `owner/name#42`.
     pub fn issue_name(&self, number: u64) -> String {
         match &self.jira {
