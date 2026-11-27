@@ -32,6 +32,8 @@ struct Web {
     svc: Arc<Services>,
     token: Option<String>,
     logins: Arc<Logins>,
+    /// Agent CLI installs started from the page.
+    installs: Arc<Logins>,
 }
 
 /// Build the routes, with `token` required by the API when set.
@@ -40,6 +42,7 @@ pub fn router(svc: Arc<Services>, token: Option<String>) -> Router {
         svc,
         token,
         logins: Arc::default(),
+        installs: Arc::default(),
     };
     let api = api::routes()
         .merge(agents::routes())

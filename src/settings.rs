@@ -119,9 +119,33 @@ pub struct AgentSettings {
     /// `~/.codex/AGENTS.md` for Codex, `~/.bob/rules/amaru.md` for Bob.
     #[serde(default)]
     pub instructions: Option<PathBuf>,
+    /// The command line that installs or updates the CLI from the web page,
+    /// program first. Each driver has a default (`npm install --global` of
+    /// its package); an empty list turns the Install button off.
+    #[serde(default)]
+    pub install: Option<Vec<String>>,
 }
 
 impl AgentSettings {
+    /// The command line that installs or updates the CLI, program first.
+    pub fn install_command(&self) -> Vec<String> {
+        self.install.clone().unwrap_or_else(|| {
+            let package = match self.driver {
+                DriverKind::Claude => "@anthropic-ai/claude-code",
+                DriverKind::Codex => "@openai/codex",
+                DriverKind::Bob => "@ibm/bob",
+            };
+            strings(&[
+                "npm",
+                "install",
+                "--global",
+                "--no-audit",
+                "--no-fund",
+                package,
+            ])
+        })
+    }
+
     /// The arguments that sign the CLI in.
     pub fn login_args(&self) -> Vec<String> {
         self.login.clone().unwrap_or_else(|| match self.driver {

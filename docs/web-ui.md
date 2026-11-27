@@ -68,6 +68,30 @@ logs a warning when it listens on a non-loopback address without a token.
 The page does not use HTTPS itself; put a reverse proxy in front of it if
 the token has to cross a network you do not trust.
 
+## Installing agents
+
+Amaru does not ship the agent CLIs: their licenses differ, and IBM Bob's
+grants no right to redistribute it. The Agents page installs them instead.
+An agent whose `command` is not on the `PATH` shows **not installed**;
+**Install** (or **Update**, once it is there) runs the agent's `install`
+command line as the user that runs the daemon, and shows its output.
+
+- By default that is `npm install --global <package>`, into `~/.local`, so
+  the CLI lands in the home directory: on a container's home volume it
+  survives a new image. The base image has Node.js and npm, and puts
+  `~/.local/bin` first on the `PATH`. Outside a container, make sure
+  `~/.local/bin` is on the `PATH` of the daemon.
+- Once the install finishes, the agent's `instructions` file and `setup`
+  steps run, as they do when the daemon starts, since a CLI that was
+  missing at the start could not be set up then. Their lines follow the
+  install's output.
+- Before installing Claude Code or IBM Bob, the page shows whose terms
+  apply and asks to go on. Installing Bob accepts IBM's license for you; do
+  not publish an image that contains it.
+- **Stop** ends an install; one still running after 15 minutes is stopped.
+- `install: []` turns the button off, for example when the image already
+  has the CLI.
+
 ## Signing agents in
 
 Amaru does not ship the agent CLIs or their accounts. The Agents page runs

@@ -180,3 +180,19 @@ async fn refuses_a_key_sign_in_the_agent_lacks() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert!(!body.to_string().contains("sk-1"));
 }
+
+#[tokio::test]
+async fn lists_how_each_agent_is_installed() {
+    let fake = Fake::new("").await;
+    let app = router(Arc::clone(&fake.svc), None);
+    let (_, list) = call(&app, get("/api/agents")).await;
+    let command = list[0]["install_command"].as_str().unwrap();
+    assert!(command.starts_with("npm install --global"));
+    assert!(command.ends_with("@anthropic-ai/claude-code"));
+    assert!(list[0]["install"].is_null());
+    assert!(list[0]["installed"].is_boolean());
+    let (status, _) = call(&app, get("/api/agents/claude/install")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(&app, post("/api/agents/claude/install/cancel", "")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
