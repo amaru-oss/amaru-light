@@ -71,6 +71,10 @@ USER mini-amaru
 Agent CLIs distributed through npm, such as Claude Code
 (`@anthropic-ai/claude-code`) and Codex (`@openai/codex`), need Node.js in
 the image. Codex also uses `bubblewrap` when it keeps its own sandbox.
+IBM Bob Shell (`@ibm/bob`, command `bob`) installs the same way, with
+`npm install -g @ibm/bob`. IBM's
+[install guide](https://bob.ibm.com/docs/shell/getting-started/install-and-setup)
+asks for Node.js 24; the package itself declares Node.js 22.15 or later.
 
 Only copy the files the image needs. Add a `.containerignore` if the context
 contains a checkout, dependency caches, local environment files, or other
@@ -87,7 +91,9 @@ describes every key.
   is the executable on the container's `PATH` or an absolute path. Add the
   arguments that let it run unattended, for example
   `[--permission-mode, bypassPermissions]` for Claude Code or
-  `[--dangerously-bypass-approvals-and-sandbox]` for Codex.
+  `[--dangerously-bypass-approvals-and-sandbox]` for Codex. Bob's `bob run`
+  approves tool calls by itself; `[--accept-license]` accepts the IBM
+  license for it.
 - In the project file, set `repo`, `fork` if the bot pushes to a fork, and
   `checks` to the project's real validation commands. They run through
   `sh -c` in the ticket's worktree.
@@ -175,6 +181,11 @@ prints in the terminal. See the [Claude Code authentication guide](https://code.
 podman exec -it amaru-light-my-project claude auth login
 podman exec amaru-light-my-project claude auth status
 ```
+
+Bob has no sign-in command for headless runs. Create an API key with the
+"Inference" scope on <https://bob.ibm.com> and give it to the container
+the same way as the GitHub token, with `-e BOB_API_KEY` and the variable
+set in your shell. See [Bob](configuration.md#agents).
 
 The host settings directory is optional. If you want to reuse preferences,
 copy or mount individual settings files after checking for host-specific

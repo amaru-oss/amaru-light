@@ -4,6 +4,7 @@
 //! step, so the agent keeps its context: the code it read, the plan it made
 //! and the feedback it already handled.
 
+mod bob;
 mod claude;
 mod codex;
 
@@ -12,7 +13,7 @@ use crate::{
     settings::{AgentSettings, DriverKind},
 };
 use anyhow::Result;
-use std::{path::Path, time::Duration};
+use std::{collections::BTreeMap, path::Path, time::Duration};
 
 /// One request to the agent.
 #[derive(Clone, Copy, Debug)]
@@ -63,6 +64,11 @@ pub trait Driver: Send + Sync {
     fn args(&self, turn: &Turn<'_>, settings: &AgentSettings) -> Vec<String>;
     /// Read one line of the CLI's JSON stream.
     fn parse(&self, line: &str, result: &mut TurnResult) -> Option<AgentEvent>;
+    /// Environment variables the driver sets from the settings, under the
+    /// agent's own `env`.
+    fn env(&self, _settings: &AgentSettings) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
 }
 
 /// A configured agent CLI.
@@ -94,6 +100,7 @@ impl Agent {
         let driver: Box<dyn Driver> = match settings.driver {
             DriverKind::Claude => Box::new(claude::Claude),
             DriverKind::Codex => Box::new(codex::Codex),
+            DriverKind::Bob => Box::<bob::Bob>::default(),
         };
         Self { settings, driver }
     }
@@ -105,10 +112,12 @@ impl Agent {
         place: Workplace<'_>,
         on_event: &mut (dyn FnMut(&AgentEvent) + Send),
     ) -> Result<TurnResult> {
+        let mut env = self.driver.env(&self.settings);
+        env.extend(self.settings.env.clone());
         let spec = Spec {
             program: self.settings.command.clone(),
             args: self.driver.args(turn, &self.settings),
-            env: self.settings.env.clone(),
+            env,
             cwd: place.cwd.to_path_buf(),
             stdin: Some(turn.prompt.to_owned()),
             timeout: place.timeout,

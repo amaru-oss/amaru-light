@@ -116,7 +116,7 @@ pub struct AgentSettings {
     pub setup: Vec<Vec<String>>,
     /// A file, relative to the daemon file, that becomes the CLI's own
     /// instructions for every project: `~/.claude/CLAUDE.md` for Claude Code,
-    /// `~/.codex/AGENTS.md` for Codex.
+    /// `~/.codex/AGENTS.md` for Codex, `~/.bob/rules/amaru.md` for Bob.
     #[serde(default)]
     pub instructions: Option<PathBuf>,
 }
@@ -127,16 +127,20 @@ impl AgentSettings {
         self.login.clone().unwrap_or_else(|| match self.driver {
             DriverKind::Claude => strings(&["auth", "login"]),
             DriverKind::Codex => strings(&["login", "--device-auth"]),
+            // Bob signs in through a browser in its own terminal UI only;
+            // its headless runs read `BOB_API_KEY` instead.
+            DriverKind::Bob => Vec::new(),
         })
     }
 
     /// The arguments that sign the CLI in with an API key on stdin. Claude
-    /// Code reads its key from `ANTHROPIC_API_KEY` instead, so it has none.
+    /// Code and Bob read their keys from `ANTHROPIC_API_KEY` and
+    /// `BOB_API_KEY` instead, so they have none.
     pub fn key_login_args(&self) -> Vec<String> {
         self.login_with_key
             .clone()
             .unwrap_or_else(|| match self.driver {
-                DriverKind::Claude => Vec::new(),
+                DriverKind::Claude | DriverKind::Bob => Vec::new(),
                 DriverKind::Codex => strings(&["login", "--with-api-key"]),
             })
     }
@@ -148,6 +152,7 @@ impl AgentSettings {
             .unwrap_or_else(|| match self.driver {
                 DriverKind::Claude => strings(&["auth", "status", "--text"]),
                 DriverKind::Codex => strings(&["login", "status"]),
+                DriverKind::Bob => Vec::new(),
             })
     }
 }
@@ -161,6 +166,7 @@ fn strings(items: &[&str]) -> Vec<String> {
 pub enum DriverKind {
     Claude,
     Codex,
+    Bob,
 }
 
 /// Machine-wide settings.

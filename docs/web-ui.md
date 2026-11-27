@@ -97,6 +97,9 @@ For each agent, the page shows:
   key; the CLI keeps its login as usual. Claude Code has no such command:
   give it `ANTHROPIC_API_KEY` through the agent's `env` or the container's
   environment instead.
+  IBM Bob has neither: its headless runs read `BOB_API_KEY` from the
+  container's environment, so the page shows no sign-in and no status for
+  it. See [Bob](configuration.md#agents).
 - **Stop** ends a sign-in that is no longer needed. A sign-in still running
   after 15 minutes is stopped.
 

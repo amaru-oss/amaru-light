@@ -59,22 +59,23 @@ projects:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `driver` | required | `claude` (Claude Code) or `codex` (Codex CLI): which output format to read. |
+| `driver` | required | `claude` (Claude Code), `codex` (Codex CLI) or `bob` (IBM Bob Shell): which output format to read. |
 | `command` | required | The executable, on `PATH` or as an absolute path. |
 | `args` | `[]` | Extra arguments, added to every call. Use them for the permission mode. |
-| `model` | none | Passed as `--model`. Leave it out to use the CLI's default. |
+| `model` | none | Passed as `--model`. Leave it out to use the CLI's default. For Bob it is the model tier, `fast`, `premium` or `ultra`, set as `BOB_SHELL_MODEL_TIER`. |
 | `env` | `{}` | Extra environment variables for the agent process. |
-| `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. `[]` turns the Sign in button off. |
-| `login_with_key` | by driver | Arguments to `command` that sign the CLI in with an API key read from stdin, for the web page's **Use an API key**. The page writes the key and closes stdin. Codex: `[login, --with-api-key]`. Claude Code: none, since it reads `ANTHROPIC_API_KEY` (set it in `env` or the container). `[]` turns it off. |
-| `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. The daemon runs it every poll and takes no work for the projects that use an agent that is not signed in; `[]` turns the check off. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. |
+| `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. Bob: none. `[]` turns the Sign in button off. |
+| `login_with_key` | by driver | Arguments to `command` that sign the CLI in with an API key read from stdin, for the web page's **Use an API key**. The page writes the key and closes stdin. Codex: `[login, --with-api-key]`. Claude Code and Bob: none, since they read `ANTHROPIC_API_KEY` and `BOB_API_KEY` (set them in `env` or the container). `[]` turns it off. |
+| `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. The daemon runs it every poll and takes no work for the projects that use an agent that is not signed in; `[]` turns the check off. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. Bob: none, so neither the page nor the daemon can tell. |
 | `setup` | `[]` | Argument lists for `command`, run in order each time `amaru serve`, `drain` or `claim --now` starts, for example to install plugins. See [Setting the agent CLIs up](#setting-the-agent-clis-up). |
-| `instructions` | none | A file, relative to the daemon file, copied at each start to the CLI's user-wide instructions: `~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for Codex. |
+| `instructions` | none | A file, relative to the daemon file, copied at each start to the CLI's user-wide instructions: `~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for Codex, `~/.bob/rules/amaru.md` for Bob (which reads `AGENTS.md` only from the repository, and every file in `~/.bob/rules` as a user-wide rule). |
 
 The daemon adds the arguments it needs itself; do not repeat them in
 `args`:
 
 - Claude Code: `claude -p --output-format stream-json --verbose [--model m] [args] [--resume <session>]`, with the prompt on stdin.
 - Codex: `codex exec --json [--model m] [args] [resume <session>] -`, with the prompt on stdin.
+- Bob: `bob run --format stream-json --trust [--resume <task>] [args]`, with the prompt on stdin and the model tier in `BOB_SHELL_MODEL_TIER`.
 
 The agent runs unattended, so it must not stop to ask for permission. It
 also has to run the project's build, which often needs the network:
@@ -92,7 +93,23 @@ agents:
     # The container is the sandbox. --full-auto keeps Codex's own sandbox
     # instead, which blocks network access by default.
     args: [--dangerously-bypass-approvals-and-sandbox]
+  bob:
+    driver: bob
+    command: bob
+    # fast, premium (Bob's default) or ultra.
+    model: premium
+    # Accepts the IBM license for the account that runs the daemon. Leave
+    # it out if you accept it once yourself in `bob chat`.
+    args: [--accept-license]
 ```
+
+`bob run` approves every tool call by itself, so Bob needs no permission
+flag. It reads its key from `BOB_API_KEY`: create a key with the
+"Inference" scope at <https://bob.ibm.com> and pass it in the daemon's
+environment, for example `-e BOB_API_KEY` on `podman run`, rather than in
+the agent's `env`, so the key stays out of the settings file. A key
+of type "general" also needs `--team-id <id>` in `args`. Bob's browser
+sign-in, from `bob chat`, does not apply to `bob run`.
 
 Sign in to each CLI once as the user that runs the daemon: on the
 [Agents page](web-ui.md#signing-agents-in) of the web interface, or in a
@@ -130,7 +147,8 @@ it takes any work (the web page is already up):
 1. The `instructions` file, when set, is copied to the file the CLI reads
    for every project: `CLAUDE.md` in `CLAUDE_CONFIG_DIR`, or in
    `~/.claude`, for Claude Code; `AGENTS.md` in `CODEX_HOME`, or in
-   `~/.codex`, for Codex. The agent's `env` is looked at first, then the
+   `~/.codex`, for Codex; `~/.bob/rules/amaru.md` for Bob, which has no
+   variable for its directory. The agent's `env` is looked at first, then the
    daemon's environment. The copy replaces what is there, so edit the file
    next to the daemon file, not the copy. Removing the key leaves the last
    copy in place. The repository's own `AGENTS.md` or `CLAUDE.md` still

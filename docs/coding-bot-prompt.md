@@ -14,8 +14,8 @@ read what it made.
 Set up an Amaru Light coding bot for this repository.
 
 Amaru Light (https://github.com/amaru-oss/amaru-light) is a daemon that
-works on GitHub issues as a bot account: it runs an agent CLI (Claude Code
-or Codex) in a worktree per issue, runs the project's checks, pushes a
+works on GitHub issues as a bot account: it runs an agent CLI (Claude Code,
+Codex or IBM Bob) in a worktree per issue, runs the project's checks, pushes a
 branch and opens a pull request, then acts on reviews and failing CI. It
 never merges. It runs in a container built FROM the Amaru Light base image,
 and each project has its own derived image with its own toolchain.
@@ -87,7 +87,8 @@ coding-bot/Containerfile
   source (for example Node.js from `docker.io/library/node`).
 - Install the agent CLI. Claude Code (`@anthropic-ai/claude-code`) and
   Codex (`@openai/codex`) come from npm, so they need Node.js. Codex also
-  wants `bubblewrap`.
+  wants `bubblewrap`. IBM Bob (`@ibm/bob`, command `bob`) comes from npm
+  too; IBM's docs ask for Node.js 24.
 - Make Git get its HTTPS credentials from gh, which reads GH_TOKEN. Without
   this the clone works but the first push fails:
     RUN git config --system credential.https://github.com.helper '' \
@@ -114,8 +115,10 @@ coding-bot/amaru.yaml (the daemon file)
                  args: [--permission-mode, bypassPermissions]
     Codex:       driver: codex, command: codex,
                  args: [--dangerously-bypass-approvals-and-sandbox]
+    IBM Bob:     driver: bob, command: bob, args: [--accept-license],
+                 key from BOB_API_KEY at run time (-e BOB_API_KEY)
   Do not add the arguments the daemon passes itself (-p, --output-format,
-  exec, --json, --resume).
+  exec, --json, run, --format, --trust, --resume).
 - Only if I ask for plugins or standing instructions for the agent: its
   `setup` steps (argument lists for the CLI, such as
   `[plugin, install, name@marketplace]`; each must be safe to repeat) and
