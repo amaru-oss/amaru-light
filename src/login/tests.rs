@@ -135,6 +135,11 @@ async fn an_agent_is_ready_only_when_signed_in() {
     assert_eq!(signed_out.detail, "Not logged in");
     let mut missing = shell("true", "true");
     missing.command = "/nonexistent/agent".to_owned();
+    let not_installed = readiness(&missing).await;
+    assert!(!not_installed.ready);
+    assert!(not_installed.detail.contains("not installed"));
+    // Even with its status check turned off, a missing CLI cannot work.
+    missing.login_status = Some(Vec::new());
     assert!(!readiness(&missing).await.ready);
     let mut unchecked = shell("true", "exit 1");
     unchecked.login_status = Some(Vec::new());
