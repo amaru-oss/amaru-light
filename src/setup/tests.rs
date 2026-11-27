@@ -69,6 +69,18 @@ async fn installs_the_instructions_where_each_cli_reads_them() {
     assert_eq!(read(home.join(".claude/CLAUDE.md")), "Be thorough.\n");
 }
 
+#[tokio::test]
+async fn installs_bob_instructions_as_a_user_wide_rule() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::write(dir.path().join("bob.md"), "Write the result file.\n").unwrap();
+    let bob = agent("one", "bob", &home, "    instructions: bob.md\n");
+    let s = settings(dir.path(), &bob);
+    assert_eq!(prepare(&s).await, 0);
+    let rule = std::fs::read_to_string(home.join(".bob/rules/amaru.md")).unwrap();
+    assert_eq!(rule, "Write the result file.\n");
+}
+
 #[test]
 fn a_missing_instructions_file_or_empty_step_fails_at_load() {
     let dir = tempfile::tempdir().unwrap();

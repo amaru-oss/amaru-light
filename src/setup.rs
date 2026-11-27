@@ -97,10 +97,13 @@ fn install_instructions(agent: &AgentSettings, source: &Path) -> Result<PathBuf>
 /// daemon's environment, as it does for the CLI itself.
 pub fn instructions_path(agent: &AgentSettings) -> Result<PathBuf> {
     let (variable, dir, file) = match agent.driver {
-        DriverKind::Claude => ("CLAUDE_CONFIG_DIR", ".claude", "CLAUDE.md"),
-        DriverKind::Codex => ("CODEX_HOME", ".codex", "AGENTS.md"),
+        DriverKind::Claude => (Some("CLAUDE_CONFIG_DIR"), ".claude", "CLAUDE.md"),
+        DriverKind::Codex => (Some("CODEX_HOME"), ".codex", "AGENTS.md"),
+        // Bob reads AGENTS.md only from the workspace; every file in
+        // ~/.bob/rules is a user-wide rule.
+        DriverKind::Bob => (None, ".bob/rules", "amaru.md"),
     };
-    let dir = match variable_of(agent, variable) {
+    let dir = match variable.and_then(|v| variable_of(agent, v)) {
         Some(dir) => dir,
         None => home(agent)
             .context("HOME is not set, so the instructions have nowhere to go")?

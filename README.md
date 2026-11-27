@@ -1,7 +1,7 @@
 # Amaru Light
 
 A personal daemon that turns GitHub issues, or Jira issues, into pull requests. It claims
-issues, works each one in a single agent CLI session (Claude Code or Codex),
+issues, works each one in a single agent CLI session (Claude Code, Codex or IBM Bob),
 runs the project's checks, opens a pull request and keeps fixing it from
 review feedback and CI until you merge it. It never merges.
 
@@ -127,7 +127,8 @@ daemon then works without the labels, and you unblock a ticket with
   `gh auth setup-git` once so Git pushes with that token. Which token to
   create depends on direct or fork pushes; see
   [GitHub access](docs/github-access.md#the-token).
-- At least one agent CLI, signed in: `claude` or `codex`. The agent runs
+- At least one agent CLI, signed in: `claude`, `codex` or `bob` (IBM Bob, with
+  `BOB_API_KEY`). The agent runs
   unattended in its worktree, so it must be allowed to run the project's
   build and tests without asking.
 - Rust (see `rust-toolchain.toml`) to build from source.
@@ -138,7 +139,7 @@ daemon then works without the labels, and you unblock a ticket with
 make install                     # target/release/amaru
 mkdir -p ~/amaru && cp examples/*.yaml ~/amaru/
 mv ~/amaru/daemon.yaml ~/amaru/amaru.yaml
-# Edit ~/amaru/amaru.yaml: the agent (Claude Code or Codex).
+# Edit ~/amaru/amaru.yaml: the agent (Claude Code, Codex or IBM Bob).
 # Edit ~/amaru/project.yaml: repo, fork, intake, agent, checks, review.
 export GH_TOKEN=...              # the bot account's token
 target/release/amaru -c ~/amaru/amaru.yaml doctor
@@ -250,7 +251,7 @@ the Rust stage of the `Containerfile`.
 | `bin/amaru.rs`, `app.rs` | Command line and wiring |
 | `scheduler` | Intake, slots, polling pull requests, retention |
 | `lifecycle` | One ticket's steps, sessions and review rounds |
-| `agent` | Claude Code and Codex drivers |
+| `agent` | Claude Code, Codex and IBM Bob drivers |
 | `contract.rs`, `prompts.rs` | The result file and the prompts |
 | `forge` | GitHub issues and pull requests through `gh`, Jira issues through `curl` |
 | `worktree.rs`, `checks.rs`, `process.rs` | Git, checks and child processes |
