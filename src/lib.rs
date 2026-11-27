@@ -16,6 +16,7 @@ pub mod process;
 pub mod prompts;
 pub mod scheduler;
 pub mod settings;
+pub mod setup;
 #[cfg(test)]
 mod testing;
 pub mod ticket;

@@ -116,6 +116,11 @@ coding-bot/amaru.yaml (the daemon file)
                  args: [--dangerously-bypass-approvals-and-sandbox]
   Do not add the arguments the daemon passes itself (-p, --output-format,
   exec, --json, --resume).
+- Only if I ask for plugins or standing instructions for the agent: its
+  `setup` steps (argument lists for the CLI, such as
+  `[plugin, install, name@marketplace]`; each must be safe to repeat) and
+  `instructions: <file>` next to amaru.yaml, copied into /config by the
+  same COPY line. See docs/configuration.md, "Setting the agent CLIs up".
 - `projects: [project.yaml]`.
 
 coding-bot/project.yaml (the project file)

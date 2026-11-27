@@ -109,6 +109,16 @@ pub struct AgentSettings {
     /// it is. Each driver has a default.
     #[serde(default)]
     pub login_status: Option<Vec<String>>,
+    /// Argument lists for `command`, run in order before the daemon starts
+    /// work: for example `[plugin, install, name@marketplace]`. They run at
+    /// every start, so each must be safe to repeat.
+    #[serde(default)]
+    pub setup: Vec<Vec<String>>,
+    /// A file, relative to the daemon file, that becomes the CLI's own
+    /// instructions for every project: `~/.claude/CLAUDE.md` for Claude Code,
+    /// `~/.codex/AGENTS.md` for Codex.
+    #[serde(default)]
+    pub instructions: Option<PathBuf>,
 }
 
 impl AgentSettings {
@@ -549,8 +559,27 @@ impl Settings {
                 self.daemon.web.listen
             );
         }
+        for (name, agent) in &self.daemon.agents {
+            self.validate_agent(name, agent)?;
+        }
         for project in &self.projects {
             self.validate_project(project)?;
+        }
+        Ok(())
+    }
+
+    fn validate_agent(&self, name: &str, agent: &AgentSettings) -> Result<()> {
+        if agent.setup.iter().any(Vec::is_empty) {
+            bail!("agent '{name}': a setup step needs at least one argument");
+        }
+        if let Some(file) = &agent.instructions {
+            let path = self.base_dir.join(file);
+            if !path.is_file() {
+                bail!(
+                    "agent '{name}': instructions file {} does not exist",
+                    path.display()
+                );
+            }
         }
         Ok(())
     }

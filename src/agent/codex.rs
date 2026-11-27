@@ -74,20 +74,11 @@ impl Driver for Codex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::DriverKind;
 
     #[test]
     fn resumes_and_parses() {
-        let settings = AgentSettings {
-            driver: DriverKind::Codex,
-            command: "codex".into(),
-            args: vec![],
-            model: None,
-            env: std::collections::BTreeMap::new(),
-            login: None,
-            login_with_key: None,
-            login_status: None,
-        };
+        let settings: AgentSettings =
+            serde_yaml::from_str("driver: codex\ncommand: codex\n").unwrap();
         let args = Codex.args(
             &Turn {
                 prompt: "x",

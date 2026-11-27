@@ -9,6 +9,7 @@ use amaru_light::{
     lifecycle::Services,
     process,
     scheduler::{Intake, Scheduler},
+    setup,
     ticket::State,
 };
 use anyhow::{Context, Result, bail};
@@ -130,6 +131,12 @@ async fn run(svc: Arc<Services>, intake: Intake, web: bool) -> Result<()> {
     } else {
         None
     };
+    // The web page is already up, so the agents can be signed in while the
+    // setup steps run; a failed step is reported and work starts anyway.
+    let failed = setup::prepare(&svc.settings).await;
+    if failed > 0 {
+        eprintln!("agent setup: {failed} step(s) failed; they run again at the next start");
+    }
     let ctrl_c = stop.clone();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {

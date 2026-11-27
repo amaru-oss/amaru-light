@@ -12,8 +12,9 @@ Both are checked strictly. An unknown or misspelled key is an error at
 startup, not a silent default. A file from Amaru Light v1 therefore fails
 to load; see [Migrating from v1](migrating-from-v1.md).
 
-Relative paths in the daemon file (`state_dir`, `projects`) resolve against
-the directory of the daemon file, not the current directory.
+Relative paths in the daemon file (`state_dir`, `projects`, an agent's
+`instructions`) resolve against the directory of the daemon file, not the
+current directory.
 
 Durations are written as a number and a unit: `30s`, `45m`, `2h`, `7d`.
 
@@ -65,6 +66,8 @@ projects:
 | `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. `[]` turns the Sign in button off. |
 | `login_with_key` | by driver | Arguments to `command` that sign the CLI in with an API key read from stdin, for the web page's **Use an API key**. The page writes the key and closes stdin. Codex: `[login, --with-api-key]`. Claude Code: none, since it reads `ANTHROPIC_API_KEY` (set it in `env` or the container). `[]` turns it off. |
 | `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. |
+| `setup` | `[]` | Argument lists for `command`, run in order each time `amaru serve`, `drain` or `claim --now` starts, for example to install plugins. See [Setting the agent CLIs up](#setting-the-agent-clis-up). |
+| `instructions` | none | A file, relative to the daemon file, copied at each start to the CLI's user-wide instructions: `~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for Codex. |
 
 The daemon adds the arguments it needs itself; do not repeat them in
 `args`:
@@ -94,6 +97,56 @@ Sign in to each CLI once as the user that runs the daemon: on the
 [Agents page](web-ui.md#signing-agents-in) of the web interface, or in a
 shell with `claude auth login` or `codex login --device-auth`. The login
 lives in that user's home directory.
+
+### Setting the agent CLIs up
+
+Two agent keys prepare a CLI before the daemon starts work, for example to
+install plugins or to give the agent standing instructions:
+
+```yaml
+agents:
+  claude:
+    driver: claude
+    command: claude
+    args: [--permission-mode, bypassPermissions]
+    instructions: claude-instructions.md
+    setup:
+      - [plugin, marketplace, add, Open-Harness-Engineering/ai-agents-oss-helper]
+      - [plugin, install, oss-helper@ai-agents-oss-helper]
+  codex:
+    driver: codex
+    command: codex
+    args: [--dangerously-bypass-approvals-and-sandbox]
+    instructions: codex-instructions.md
+    setup:
+      - [plugin, marketplace, add, Open-Harness-Engineering/ai-agents-oss-helper]
+      - [plugin, add, oss-helper@ai-agents-oss-helper]
+```
+
+Each time `amaru serve`, `amaru drain` or `amaru claim --now` starts, before
+it takes any work (the web page is already up):
+
+1. The `instructions` file, when set, is copied to the file the CLI reads
+   for every project: `CLAUDE.md` in `CLAUDE_CONFIG_DIR`, or in
+   `~/.claude`, for Claude Code; `AGENTS.md` in `CODEX_HOME`, or in
+   `~/.codex`, for Codex. The agent's `env` is looked at first, then the
+   daemon's environment. The copy replaces what is there, so edit the file
+   next to the daemon file, not the copy. Removing the key leaves the last
+   copy in place. The repository's own `AGENTS.md` or `CLAUDE.md` still
+   applies on top of it.
+2. Each `setup` entry runs as `command` with those arguments, in order, in
+   the home directory, with the agent's `env`, for at most 5 minutes.
+
+Both run at every start, because the home directory is usually a volume
+that outlives the image: a new image or a new volume gets the same setup.
+Every step must therefore be safe to repeat. `claude plugin marketplace
+add`, `claude plugin install`, `codex plugin marketplace add` and `codex
+plugin add` all are: run again, they report that the marketplace or plugin
+is already there and exit 0.
+
+A failed step is reported on stderr (`setup <agent>: failed: ...`) and the
+daemon starts anyway; the next start tries again. A missing `instructions`
+file or an empty `setup` entry is an error when the settings load.
 
 ## The project file
 

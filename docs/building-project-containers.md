@@ -110,6 +110,12 @@ two files in `/config` one of two ways:
   COPY --chown=mini-amaru:mini-amaru amaru.yaml project.yaml /config/
   ```
 
+An agent's `instructions` file (its user-wide `CLAUDE.md` or `AGENTS.md`)
+goes in `/config` too, next to `amaru.yaml`. The daemon copies it, and runs
+the agent's `setup` steps (such as plugin installs), into the home volume
+at each start; see
+[Setting the agent CLIs up](configuration.md#setting-the-agent-clis-up).
+
 The daemon clones each repository into `<state_dir>/repos` when its first
 ticket starts and keeps one worktree per ticket next to the clone. For the
 GitHub token, the fork and labels, see [GitHub access](github-access.md).
