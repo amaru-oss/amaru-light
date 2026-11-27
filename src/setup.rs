@@ -25,28 +25,44 @@ const STEP_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 pub async fn prepare(settings: &Settings) -> usize {
     let mut failed = 0;
     for (name, agent) in &settings.daemon.agents {
-        if let Some(file) = &agent.instructions {
-            let source = settings.base_dir.join(file);
-            match install_instructions(agent, &source) {
-                Ok(target) => eprintln!(
-                    "setup {name}: instructions {} -> {}",
-                    source.display(),
-                    target.display()
-                ),
-                Err(e) => {
-                    eprintln!("setup {name}: instructions failed: {e:#}");
-                    failed += 1;
-                }
+        failed += prepare_agent(&settings.base_dir, name, agent, &mut |line| {
+            eprintln!("{line}");
+        })
+        .await;
+    }
+    failed
+}
+
+/// Prepare one agent, passing each report line to `report`; return how
+/// many steps failed. `base_dir` is where the daemon file is.
+pub async fn prepare_agent(
+    base_dir: &Path,
+    name: &str,
+    agent: &AgentSettings,
+    report: &mut (dyn FnMut(String) + Send),
+) -> usize {
+    let mut failed = 0;
+    if let Some(file) = &agent.instructions {
+        let source = base_dir.join(file);
+        match install_instructions(agent, &source) {
+            Ok(target) => report(format!(
+                "setup {name}: instructions {} -> {}",
+                source.display(),
+                target.display()
+            )),
+            Err(e) => {
+                report(format!("setup {name}: instructions failed: {e:#}"));
+                failed += 1;
             }
         }
-        for args in &agent.setup {
-            let line = format!("{} {}", agent.command, args.join(" "));
-            match run_step(agent, args).await {
-                Ok(()) => eprintln!("setup {name}: ok: {line}"),
-                Err(e) => {
-                    eprintln!("setup {name}: failed: {line}: {e:#}");
-                    failed += 1;
-                }
+    }
+    for args in &agent.setup {
+        let line = format!("{} {}", agent.command, args.join(" "));
+        match run_step(agent, args).await {
+            Ok(()) => report(format!("setup {name}: ok: {line}")),
+            Err(e) => {
+                report(format!("setup {name}: failed: {line}: {e:#}"));
+                failed += 1;
             }
         }
     }

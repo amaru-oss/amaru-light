@@ -6,6 +6,7 @@ use super::{
     api::{ApiError, ApiResult},
 };
 use crate::{
+    install,
     login::{self, LoginStatus, LoginView},
     settings::AgentSettings,
 };
@@ -25,6 +26,11 @@ pub(super) fn routes() -> Router<Web> {
         .route("/api/agents/{name}/login", get(progress).post(start))
         .route("/api/agents/{name}/login/input", post(input))
         .route("/api/agents/{name}/login/cancel", post(cancel))
+        .route(
+            "/api/agents/{name}/install",
+            get(install_progress).post(install),
+        )
+        .route("/api/agents/{name}/install/cancel", post(install_cancel))
 }
 
 fn agent<'a>(web: &'a Web, name: &str) -> Result<&'a AgentSettings, ApiError> {
@@ -49,8 +55,17 @@ async fn agents(State(web): State<Web>) -> Json<Vec<Value>> {
                 .filter(|p| &p.agent == name)
                 .map(|p| p.repo.as_str())
                 .collect();
-            json!({
-                "name": name,
+            card(&web, name, a, &used_by)
+        })
+        .collect();
+    Json(list)
+}
+
+/// What the page shows of one agent.
+fn card(web: &Web, name: &str, a: &AgentSettings, used_by: &[&str]) -> Value {
+    let install_command = a.install_command();
+    json!({
+        "name": name,
                 "driver": a.driver,
                 "command": a.command,
                 "login_command": command_line(a, &a.login_args()),
@@ -58,10 +73,11 @@ async fn agents(State(web): State<Web>) -> Json<Vec<Value>> {
                 "status_command": command_line(a, &a.status_args()),
                 "used_by": used_by,
                 "login": web.logins.get(name),
-            })
-        })
-        .collect();
-    Json(list)
+                "installed": install::installed(a),
+                "install_command": (!install_command.is_empty()).then(|| install_command.join(" ")),
+                "install": web.installs.get(name),
+        "install_notice": install::notice(a),
+    })
 }
 
 /// The command as the operator would type it, or `None` when turned off.
@@ -129,4 +145,30 @@ async fn cancel(State(web): State<Web>, Path(name): Path<String>) -> ApiResult<L
         .cancel(&name)
         .map_err(|e| ApiError::rejected(&e))?;
     progress(State(web), Path(name)).await
+}
+
+async fn install_progress(
+    State(web): State<Web>,
+    Path(name): Path<String>,
+) -> ApiResult<LoginView> {
+    agent(&web, &name)?;
+    web.installs
+        .get(&name)
+        .map(Json)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, format!("no install for {name}")))
+}
+
+async fn install(State(web): State<Web>, Path(name): Path<String>) -> ApiResult<LoginView> {
+    let settings = agent(&web, &name)?;
+    let view = install::start(&web.installs, &web.svc.settings.base_dir, &name, settings)
+        .map_err(|e| ApiError::rejected(&e))?;
+    Ok(Json(view))
+}
+
+async fn install_cancel(State(web): State<Web>, Path(name): Path<String>) -> ApiResult<LoginView> {
+    agent(&web, &name)?;
+    web.installs
+        .cancel(&name)
+        .map_err(|e| ApiError::rejected(&e))?;
+    install_progress(State(web), Path(name)).await
 }

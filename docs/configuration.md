@@ -69,6 +69,7 @@ projects:
 | `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. The daemon runs it every poll and takes no work for the projects that use an agent that is not signed in; `[]` turns the check off. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. Bob: none, so neither the page nor the daemon can tell. |
 | `setup` | `[]` | Argument lists for `command`, run in order each time `amaru serve`, `drain` or `claim --now` starts, for example to install plugins. See [Setting the agent CLIs up](#setting-the-agent-clis-up). |
 | `instructions` | none | A file, relative to the daemon file, copied at each start to the CLI's user-wide instructions: `~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for Codex, `~/.bob/rules/amaru.md` for Bob (which reads `AGENTS.md` only from the repository, and every file in `~/.bob/rules` as a user-wide rule). |
+| `install` | by driver | The command line, program first, that installs or updates the CLI from the web page's **Install** button: `[npm, install, --global, --no-audit, --no-fund, <package>]` with `@anthropic-ai/claude-code`, `@openai/codex` or `@ibm/bob`. npm installs into `~/.local` unless `NPM_CONFIG_PREFIX` is set. After a successful install the agent's `instructions` and `setup` run, as at a start. `[]` turns the button off. See [Installing agents](web-ui.md#installing-agents). |
 
 The daemon adds the arguments it needs itself; do not repeat them in
 `args`:

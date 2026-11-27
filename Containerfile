@@ -29,8 +29,10 @@ RUN git clone --quiet --depth 1 --branch "${RIPWIRE_VERSION}" \
 FROM registry.fedoraproject.org/fedora-minimal:45
 # ripwire needs `libstdc++`; its skills installer needs `bash` and `diffutils`.
 # Jira projects are read with `curl`; the minimal image may already have it.
+# Node.js and npm install the agent CLIs from the web page's Agents page:
+# Amaru does not ship the CLIs themselves.
 RUN microdnf install -y --setopt=install_weak_deps=0 ca-certificates gh git-core openssh-clients shadow-utils \
-        bash diffutils libstdc++ \
+        bash diffutils libstdc++ nodejs npm \
     && { command -v curl >/dev/null || microdnf install -y --setopt=install_weak_deps=0 curl; } \
     && microdnf clean all \
     && useradd --create-home --uid 1000 mini-amaru
@@ -49,6 +51,9 @@ RUN chmod +x entrypoint \
     && chown mini-amaru:mini-amaru /config /data
 
 ENV HOME=/home/mini-amaru
+# Agent CLIs installed from the web page land in ~/.local, on the home
+# volume, and come first.
+ENV PATH=/home/mini-amaru/.local/bin:$PATH
 USER mini-amaru
 VOLUME ["/data"]
 # The web interface, with `web.listen: 0.0.0.0:8765` in amaru.yaml.

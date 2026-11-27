@@ -53,7 +53,7 @@ struct Progress {
 }
 
 #[derive(Debug)]
-struct Login {
+pub(crate) struct Login {
     progress: Mutex<Progress>,
     stdin: tokio::sync::Mutex<Option<ChildStdin>>,
     stop: Notify,
@@ -64,7 +64,7 @@ impl Login {
         self.progress.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn append(&self, bytes: &[u8]) {
+    pub(crate) fn append(&self, bytes: &[u8]) {
         let mut p = self.progress();
         p.output.extend_from_slice(bytes);
         if p.output.len() > MAX_OUTPUT {
@@ -73,7 +73,7 @@ impl Login {
         }
     }
 
-    fn view(&self) -> LoginView {
+    pub(crate) fn view(&self) -> LoginView {
         let p = self.progress();
         LoginView {
             running: p.exit.is_none(),
@@ -120,18 +120,35 @@ impl Logins {
             };
             bail!("signing in {how}from the page is turned off for agent {name}");
         }
-        let child = command(agent, &args)
-            .stdin(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("cannot run {} {}", agent.command, args.join(" ")))?;
-        let login = watch(child);
-        if let Some(old) = self.map().insert(name.to_owned(), Arc::clone(&login)) {
-            old.stop.notify_one();
-        }
+        let login = self.run(name, command(agent, &args).stdin(Stdio::piped()))?;
         if let Some(key) = key {
             send_key(&login, key).await?;
         }
         Ok(login.view())
+    }
+
+    /// Run `cmd` for `name`, stopping the command already running for it, and
+    /// keep its output for the page.
+    pub(crate) fn run(&self, name: &str, cmd: &mut Command) -> Result<Arc<Login>> {
+        self.run_then(name, cmd, None)
+    }
+
+    /// Like `run`, and once the command has finished well, run `then`
+    /// before the page sees it end. `then` may add to the output; what it
+    /// returns, when not empty, is added to how the command ended.
+    pub(crate) fn run_then(
+        &self,
+        name: &str,
+        cmd: &mut Command,
+        then: Option<Then>,
+    ) -> Result<Arc<Login>> {
+        let line = format!("{cmd:?}");
+        let child = cmd.spawn().with_context(|| format!("cannot run {line}"))?;
+        let login = watch(child, then);
+        if let Some(old) = self.map().insert(name.to_owned(), Arc::clone(&login)) {
+            old.stop.notify_one();
+        }
+        Ok(login)
     }
 
     /// The latest sign-in for `name`, if any.
@@ -263,9 +280,14 @@ impl SignIns {
 }
 
 fn command(agent: &AgentSettings, args: &[String]) -> Command {
-    let mut cmd = Command::new(&agent.command);
+    program(&agent.command, args, &agent.env)
+}
+
+/// A command for the page to run: its output piped, in its own process group.
+pub(crate) fn program(program: &str, args: &[String], env: &BTreeMap<String, String>) -> Command {
+    let mut cmd = Command::new(program);
     cmd.args(args)
-        .envs(&agent.env)
+        .envs(env)
         .env("NO_COLOR", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -275,7 +297,7 @@ fn command(agent: &AgentSettings, args: &[String]) -> Command {
 }
 
 /// Collect the child's output and wait for it to end, be stopped or time out.
-fn watch(mut child: Child) -> Arc<Login> {
+fn watch(mut child: Child, then: Option<Then>) -> Arc<Login> {
     let login = Arc::new(Login {
         progress: Mutex::new(Progress {
             output: Vec::new(),
@@ -295,15 +317,21 @@ fn watch(mut child: Child) -> Arc<Login> {
             .take()
             .map(|e| tokio::spawn(collect(e, Arc::clone(&login)))),
     ];
-    tokio::spawn(finish(child, Arc::clone(&login), readers));
+    tokio::spawn(finish(child, Arc::clone(&login), readers, then));
     login
 }
+
+/// Work to do after a command has finished well, given its output to add to.
+pub(crate) type Then = Box<
+    dyn FnOnce(Arc<Login>) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>>
+        + Send,
+>;
 
 type Reader = Option<tokio::task::JoinHandle<()>>;
 
 /// Record how the sign-in ended once its output is read.
-async fn finish(mut child: Child, login: Arc<Login>, readers: [Reader; 2]) {
-    let exit = wait(&mut child, &login).await;
+async fn finish(mut child: Child, login: Arc<Login>, readers: [Reader; 2], then: Option<Then>) {
+    let mut exit = wait(&mut child, &login).await;
     for reader in readers.into_iter().flatten() {
         // A process the CLI left behind may hold the pipes open.
         let abort = reader.abort_handle();
@@ -315,6 +343,12 @@ async fn finish(mut child: Child, login: Arc<Login>, readers: [Reader; 2]) {
         }
     }
     *login.stdin.lock().await = None;
+    if let Some(then) = then.filter(|_| exit == "finished") {
+        let note = then(Arc::clone(&login)).await;
+        if !note.is_empty() {
+            exit = format!("{exit}, {note}");
+        }
+    }
     login.progress().exit = Some(exit);
 }
 

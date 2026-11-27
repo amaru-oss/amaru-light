@@ -10,6 +10,7 @@ pub mod cleanup;
 pub mod contract;
 pub mod db;
 pub mod forge;
+pub mod install;
 pub mod lifecycle;
 pub mod login;
 pub mod process;

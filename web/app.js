@@ -560,21 +560,35 @@ function agentCard(a) {
     type: "button", class: "ghost",
     onclick: () => { keyForm.hidden = !keyForm.hidden; if (!keyForm.hidden) keyField.focus(); },
   }, "Use an API key");
+  const installSession = h("div", { class: "login-session" });
+  const install = h("button", { type: "button", class: a.installed ? "ghost" : "", onclick: () => startInstall() },
+    a.installed ? "Update" : "Install");
+  const notice = a.install_notice ? h("p", { class: "sub key-note" }, linkify(a.install_notice)) : null;
   const el = h("section", { class: "card agent" },
     h("div", { class: "agent-head" },
       h("div", {},
         h("h2", {}, a.name, " ", chip),
         h("p", { class: "sub" }, `${a.driver} driver · `, h("code", {}, a.command),
           a.used_by.length ? ` · used by ${a.used_by.join(", ")}` : " · not used by a project")),
-      h("div", { class: "actions" }, check, a.key_login_command ? useKey : null, a.login_command ? signIn : null)),
+      h("div", { class: "actions" }, a.install_command ? install : null, check,
+        a.key_login_command ? useKey : null, a.login_command ? signIn : null)),
+    a.install_command ? notice : null,
     a.key_login_command
       ? keyForm
       : null,
     h("details", {}, h("summary", {}, "Status output"), detail),
+    installSession,
     session);
   let login = a.login;
+  let installing = a.install;
 
   async function checkStatus() {
+    if (!a.installed) {
+      chip.className = "state blocked";
+      fill(chip, "not installed");
+      fill(detail, `$ ${a.command}: not found on PATH` + (a.install_command ? `\nInstall runs: ${a.install_command}` : ""));
+      return;
+    }
     fill(chip, "checking…");
     chip.className = "state";
     try {
@@ -605,6 +619,47 @@ function agentCard(a) {
   }
 
   const start = () => call("");
+
+  const base = `/api/agents/${encodeURIComponent(a.name)}/install`;
+
+  async function startInstall(path = "") {
+    if (!path && a.install_notice && !window.confirm(`${a.install_notice}\n\nRun ${a.install_command}?`)) return;
+    try {
+      installing = await api(base + path, { method: "POST", body: "{}" });
+      drawInstall();
+    } catch (error) {
+      if (error instanceof Unauthorized) return showLogin();
+      fill(installSession, h("p", { class: "notice bad" }, error.message));
+    }
+  }
+
+  async function refreshInstall() {
+    const was = installing && installing.running;
+    try {
+      installing = await api(base);
+    } catch (error) {
+      if (error instanceof Unauthorized) throw error;
+      return;
+    }
+    drawInstall();
+    // The command may be on PATH now: draw the page again.
+    if (was && !installing.running) setTimeout(showAgents, 2000);
+  }
+
+  function drawInstall() {
+    if (!installing) return fill(installSession);
+    const output = h("pre", { class: "login-output" }, linkify(installing.output || "Waiting for output…"));
+    fill(installSession, [
+      h("div", { class: "login-head" },
+        h("strong", {}, installing.running ? "Installing" : `Install ${installing.exit}`),
+        h("span", { class: "sub" }, ` · started ${relative(installing.started_at)}`)),
+      output,
+      installing.running
+        ? h("div", { class: "login-input" }, h("button", { type: "button", class: "danger", onclick: () => startInstall("/cancel") }, "Stop"))
+        : null,
+    ]);
+    output.scrollTop = output.scrollHeight;
+  }
 
   async function refresh() {
     try {
@@ -646,8 +701,16 @@ function agentCard(a) {
   }
 
   draw();
+  drawInstall();
   checkStatus();
-  return { el, refresh, running: () => Boolean(login && login.running) };
+  return {
+    el,
+    refresh: async () => {
+      if (login && login.running) await refresh();
+      if (installing && installing.running) await refreshInstall();
+    },
+    running: () => Boolean((login && login.running) || (installing && installing.running)),
+  };
 }
 
 /** Text with its web links made clickable. */

@@ -165,6 +165,7 @@ mod tests {
             login_status: None,
             setup: Vec::new(),
             instructions: None,
+            install: None,
         })
     }
 

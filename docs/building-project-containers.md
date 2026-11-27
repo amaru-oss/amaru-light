@@ -44,8 +44,11 @@ reach the home volume. For Claude Code it also installs the
 `CLAUDE_CONFIG_DIR`, the skills and the subagent go to its `skills` and
 `agents` directories. Set `AMARU_RIPWIRE_SKILLS=0` to skip this step.
 
-Build one derived image per project. Install the agent CLI and the project's
-build and test tools in the derived image. Keep the inherited entrypoint and
+Build one derived image per project. Install the project's build and test
+tools in the derived image. The agent CLI can be installed there too, or
+later from the web interface's [Agents page](web-ui.md#installing-agents),
+into the home volume; IBM Bob, whose license grants no right to redistribute
+it, only that way in an image you publish. Keep the inherited entrypoint and
 `/app` working directory. Switch back to `USER mini-amaru` after installation.
 
 Save the derived image definition as `Containerfile.project`. This example

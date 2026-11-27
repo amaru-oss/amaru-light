@@ -13,6 +13,7 @@ fn shell(login: &str, status: &str) -> AgentSettings {
         login_status: Some(vec!["-c".to_owned(), status.to_owned()]),
         setup: Vec::new(),
         instructions: None,
+        install: None,
     }
 }
 
