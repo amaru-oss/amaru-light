@@ -78,8 +78,10 @@ point to, set through the agent's `env`.
 
 For each agent, the page shows:
 
-- **Signed in** or **not signed in**, from the CLI's status command. **Check
-  again** runs it again; **Status output** shows what it printed.
+- **Signed in** or **not signed in**, from the CLI's status command. **Check again**
+  runs it again; **Status output** shows what it printed. While an agent is
+  not signed in, the daemon claims no work for the projects that use it, and
+  the Tickets page says so.
 - **Sign in** starts the sign-in command and shows its output as it comes.
   Open the link it prints in any browser, on any device.
   - Codex (`codex login --device-auth`) prints a link and a one-time code.

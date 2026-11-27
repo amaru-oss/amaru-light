@@ -13,6 +13,10 @@ impl Scheduler {
             if !ticket.state.needs_slot() || self.is_running(ticket.id)? {
                 continue;
             }
+            let project = self.svc.settings.project(&ticket.repo);
+            if project.is_some_and(|p| !self.can_work(p)) {
+                continue;
+            }
             let (stop, cancel) = watch::channel(false);
             lock(&self.running)?.insert(ticket.id, stop);
             let me = Arc::clone(self);
@@ -54,7 +58,7 @@ impl Scheduler {
         let id = ticket.id;
         let reference = ticket.reference();
         log(&format!("{reference}: working ({})", ticket.state));
-        match self.drive(ticket, cancel).await {
+        match Box::pin(self.drive(ticket, cancel)).await {
             Ok(state) => {
                 log(&format!("{reference}: {state}"));
                 if let Ok(mut errors) = lock(&self.errors) {
@@ -72,10 +76,33 @@ impl Scheduler {
         cancel: watch::Receiver<bool>,
     ) -> Result<crate::ticket::State> {
         let id = ticket.id;
+        let repo = ticket.repo.clone();
         let mut job = Job::new(&self.svc, ticket, Some(cancel))?;
         let Err(error) = job.drive().await else {
             return Ok(job.into_ticket().state);
         };
+        // An agent signed out mid-run is not the ticket's fault: do not count
+        // the error, and start the ticket again once the agent is signed in.
+        if !self.still_signed_in(&repo).await {
+            self.svc.store.event(
+                id,
+                "WAITING_FOR_SIGN_IN",
+                &serde_json::json!({ "error": format!("{error:#}") }),
+            )?;
+            return Err(error.context("the agent is not signed in; the ticket waits for it"));
+        }
+        let count = self.count_error(id, &error)?;
+        if count >= MAX_ERRORS {
+            // Start from the stored ticket: the job may have saved progress.
+            let stored = self.svc.store.get(id)?.unwrap_or_else(|| job.into_ticket());
+            Job::new(&self.svc, stored, None)?.fail(&error).await?;
+            lock(&self.errors)?.remove(&id);
+        }
+        Err(error)
+    }
+
+    /// Count one more error in a row for the ticket, and record it.
+    fn count_error(&self, id: i64, error: &anyhow::Error) -> Result<u32> {
         let count = {
             let mut errors = lock(&self.errors)?;
             let count = errors.entry(id).or_default();
@@ -87,12 +114,6 @@ impl Scheduler {
             "ERROR",
             &serde_json::json!({ "error": format!("{error:#}"), "count": count }),
         )?;
-        if count >= MAX_ERRORS {
-            // Start from the stored ticket: the job may have saved progress.
-            let stored = self.svc.store.get(id)?.unwrap_or_else(|| job.into_ticket());
-            Job::new(&self.svc, stored, None)?.fail(&error).await?;
-            lock(&self.errors)?.remove(&id);
-        }
-        Err(error)
+        Ok(count)
     }
 }

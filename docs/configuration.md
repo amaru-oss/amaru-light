@@ -19,7 +19,8 @@ current directory.
 Durations are written as a number and a unit: `30s`, `45m`, `2h`, `7d`.
 
 Run `amaru -c amaru.yaml doctor` after every change. It loads both files and
-checks Git, `gh auth status` and each agent CLI.
+checks Git, `gh auth status` and each agent CLI, including whether it is
+signed in.
 
 ## The daemon file
 
@@ -65,7 +66,7 @@ projects:
 | `env` | `{}` | Extra environment variables for the agent process. |
 | `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. `[]` turns the Sign in button off. |
 | `login_with_key` | by driver | Arguments to `command` that sign the CLI in with an API key read from stdin, for the web page's **Use an API key**. The page writes the key and closes stdin. Codex: `[login, --with-api-key]`. Claude Code: none, since it reads `ANTHROPIC_API_KEY` (set it in `env` or the container). `[]` turns it off. |
-| `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. |
+| `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. The daemon runs it every poll and takes no work for the projects that use an agent that is not signed in; `[]` turns the check off. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. |
 | `setup` | `[]` | Argument lists for `command`, run in order each time `amaru serve`, `drain` or `claim --now` starts, for example to install plugins. See [Setting the agent CLIs up](#setting-the-agent-clis-up). |
 | `instructions` | none | A file, relative to the daemon file, copied at each start to the CLI's user-wide instructions: `~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for Codex. |
 

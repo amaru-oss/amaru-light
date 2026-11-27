@@ -13,6 +13,9 @@ impl Scheduler {
     pub(super) async fn claim_new(&self) -> Result<()> {
         let projects = self.svc.settings.projects.clone();
         for project in &projects {
+            if !self.can_work(project) {
+                continue;
+            }
             let found = match &self.intake {
                 Intake::Autonomous => self.autonomous(project).await,
                 Intake::Milestone { repo, milestone }

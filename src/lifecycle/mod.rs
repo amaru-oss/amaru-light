@@ -9,6 +9,7 @@ mod turn;
 use crate::{
     db::{Store, now},
     forge::{Forge, ForkError, Target, TicketSource},
+    login::SignIns,
     process::Cancel,
     prompts::Prompts,
     settings::{ProjectSettings, Settings},
@@ -34,6 +35,8 @@ pub struct Services {
     pub forge: Arc<dyn Forge>,
     pub workspace: Workspace,
     pub prompts: Prompts,
+    /// Whether each agent is signed in, as the scheduler last checked.
+    pub sign_ins: SignIns,
 }
 
 impl fmt::Debug for Services {

@@ -4,7 +4,7 @@ use axum::{
     body::{Body, to_bytes},
     http::Request,
 };
-use serde_json::Value;
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 async fn call(app: &Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -84,6 +84,21 @@ async fn reports_settings_and_serves_the_page() {
     let (status, info) = call(&app, get("/api/info")).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(info["projects"][0]["repo"], "me/app");
+    assert_eq!(info["projects"][0]["waiting_for_sign_in"], json!([]));
+    fake.svc.sign_ins.record(
+        "claude",
+        crate::login::Readiness {
+            ready: false,
+            detail: "Not logged in".into(),
+            checked_at: String::new(),
+        },
+    );
+    let (_, info) = call(&app, get("/api/info")).await;
+    assert_eq!(
+        info["projects"][0]["waiting_for_sign_in"],
+        json!(["claude"])
+    );
+    assert_eq!(info["agents"]["claude"]["ready"], false);
     let response = app.clone().oneshot(get("/")).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let policy = response.headers().get(header::CONTENT_SECURITY_POLICY);

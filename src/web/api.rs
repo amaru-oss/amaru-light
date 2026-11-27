@@ -110,7 +110,14 @@ async fn health() -> Json<Value> {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
 }
 
-fn project(p: &ProjectSettings) -> Value {
+/// A project, with the agents it waits for: no work is claimed or started
+/// for it while one of them is not signed in.
+fn project(svc: &Services, p: &ProjectSettings) -> Value {
+    let waiting: Vec<&str> = p
+        .agents()
+        .into_iter()
+        .filter(|a| !svc.sign_ins.ready(a))
+        .collect();
     json!({
         "repo": p.repo,
         "fork": p.fork,
@@ -122,12 +129,17 @@ fn project(p: &ProjectSettings) -> Value {
         "checks": p.checks.iter().map(|c| &c.name).collect::<Vec<_>>(),
         "self_review": format!("{:?}", p.review.self_review),
         "reviewers": p.review.reviewers,
+        "waiting_for_sign_in": waiting,
     })
 }
 
 async fn info(State(web): State<Web>) -> Json<Value> {
     let settings = &web.svc.settings;
-    let projects: Vec<Value> = settings.projects.iter().map(project).collect();
+    let projects: Vec<Value> = settings
+        .projects
+        .iter()
+        .map(|p| project(&web.svc, p))
+        .collect();
     let states: Vec<Value> = TicketState::ALL
         .iter()
         .map(|s| json!({ "name": s, "active": s.needs_slot(), "terminal": s.is_terminal() }))
@@ -138,6 +150,7 @@ async fn info(State(web): State<Web>) -> Json<Value> {
         "max_parallel": settings.daemon.max_parallel,
         "bot_login": settings.daemon.bot_login,
         "projects": projects,
+        "agents": web.svc.sign_ins.all(),
         "states": states,
     }))
 }

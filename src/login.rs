@@ -9,7 +9,7 @@ use crate::settings::AgentSettings;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     process::{ExitStatus, Stdio},
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
@@ -194,6 +194,71 @@ pub async fn status(agent: &AgentSettings) -> LoginStatus {
     LoginStatus {
         signed_in,
         detail: tail(detail.trim(), 2_000),
+    }
+}
+
+/// Whether an agent can take work, as the scheduler last found it.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Readiness {
+    /// Signed in, or no status command is set to tell.
+    pub ready: bool,
+    pub detail: String,
+    pub checked_at: String,
+}
+
+/// Ask the agent CLI whether it is signed in. An agent whose status command
+/// is turned off is taken to be ready; one whose status command fails,
+/// cannot run or does not answer is not, because its turns would fail too.
+pub async fn readiness(agent: &AgentSettings) -> Readiness {
+    let (ready, detail) = if agent.status_args().is_empty() {
+        (true, "no status command is set".to_owned())
+    } else {
+        let found = status(agent).await;
+        let detail = if found.detail.is_empty() {
+            match found.signed_in {
+                Some(true) => "signed in".to_owned(),
+                _ => "not signed in".to_owned(),
+            }
+        } else {
+            found.detail
+        };
+        (found.signed_in == Some(true), detail)
+    };
+    Readiness {
+        ready,
+        detail,
+        checked_at: crate::db::now(),
+    }
+}
+
+/// The latest readiness of each agent, shared by the scheduler, which
+/// checks it, and the web page, which shows it.
+#[derive(Debug, Default)]
+pub struct SignIns {
+    by_agent: Mutex<BTreeMap<String, Readiness>>,
+}
+
+impl SignIns {
+    fn map(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Readiness>> {
+        self.by_agent.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Keep the latest check of `name`. True when it changes whether the
+    /// agent can take work, or is the first check and finds it cannot.
+    pub fn record(&self, name: &str, found: Readiness) -> bool {
+        let ready = found.ready;
+        let before = self.map().insert(name.to_owned(), found);
+        before.map_or(!ready, |b| b.ready != ready)
+    }
+
+    /// Whether `name` can take work. An agent not checked yet can.
+    pub fn ready(&self, name: &str) -> bool {
+        self.map().get(name).is_none_or(|r| r.ready)
+    }
+
+    /// Every agent checked so far.
+    pub fn all(&self) -> BTreeMap<String, Readiness> {
+        self.map().clone()
     }
 }
 

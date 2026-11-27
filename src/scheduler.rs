@@ -93,9 +93,11 @@ impl Scheduler {
         }
     }
 
-    /// One round: claim new work, update tickets, start what can run, and
-    /// delete the worktrees of tickets that are finished.
+    /// One round: check that the agents are signed in, claim new work,
+    /// update tickets, start what can run, and delete the worktrees of
+    /// tickets that are finished.
     pub async fn tick(self: &Arc<Self>) -> Result<()> {
+        self.check_agents().await;
         self.claim_new().await?;
         for ticket in self.svc.store.unfinished()? {
             if let Err(e) = self.maintain(ticket).await {
@@ -135,6 +137,10 @@ impl Scheduler {
     }
 
     fn drained(&self) -> Result<bool> {
+        // Work cannot start while an agent is signed out: wait for it.
+        if !self.svc.settings.projects.iter().all(|p| self.can_work(p)) {
+            return Ok(false);
+        }
         let busy = self
             .svc
             .store
@@ -148,6 +154,7 @@ impl Scheduler {
 mod intake;
 mod maintain;
 mod run;
+mod sign_in;
 
 #[cfg(test)]
 mod tests;
