@@ -42,6 +42,16 @@ Keep `RUST_TOOLCHAIN` in `coding-bot/Containerfile` on the release in
 they differ, rustup installs the pinned release on the first check, which
 still works but takes time again each time the container is recreated.
 
+The image ships [kache](https://github.com/kunobi-ninja/kache), and
+`RUSTC_WRAPPER` sends every rustc call through it, so a new worktree reuses
+the crates an earlier ticket compiled. The cache lives in `~/.cache/kache`
+on the home volume and survives a new image; its daemon starts with the
+first compile. `podman exec amaru-light-amaru-light kache stats` shows the
+hit rate. Run the container with `-e KACHE_DISABLED=1` to turn it off, or
+`-e KACHE_MAX_SIZE=<size>` to change its disk budget (by default 5% of the
+disk, at least 5 GiB). To move to a newer kache, change `KACHE_VERSION` and
+both `KACHE_SHA256_*` values to the release's `.sha256` files.
+
 ## Run
 
 ```sh
