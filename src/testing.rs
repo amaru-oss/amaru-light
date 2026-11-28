@@ -51,6 +51,8 @@ mkdir -p .amaru
 case "$prompt" in
   *"stepped in on your work"*) touch guided.txt; c add guided.txt; c commit -qm guided
     echo '{"status":"done","summary":"Followed the guidance"}' > .amaru/result.json ;;
+  *"You are analyzing issue"*) if [ ! -f "$dir/no-analysis" ]; then printf 'Root cause: the parser.\n' > .amaru/analysis.md; fi
+    echo '{"status":"done","summary":"Analyzed"}' > .amaru/result.json ;;
   *"You are working on issue"*) echo done >> feature.txt; c add feature.txt; c commit -qm feature
     echo '{"status":"done","summary":"Added the feature","complete":true}' > .amaru/result.json ;;
   *"project check"*) touch fixed.txt; c add fixed.txt; c commit -qm fix

@@ -6,7 +6,7 @@ use crate::{
     contract::{Report, Status},
     forge::{NewPullRequest, PullRequest, Target},
     settings::SelfReview,
-    ticket::{State, slug},
+    ticket::{Goal, State, slug},
 };
 use anyhow::{Context, Result};
 
@@ -17,6 +17,10 @@ impl Job<'_> {
         let issue = self.svc.source.issue(&repo, number).await?;
         if !issue.open {
             return Ok(State::Cancelled);
+        }
+        let label = &self.project.intake.analyze_label;
+        if issue.labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
+            self.ticket.goal = Goal::Analyze;
         }
         self.ticket.title = issue.title;
         self.ticket.body = issue.body;
@@ -30,7 +34,11 @@ impl Job<'_> {
         self.choose_base(&issue.blocked_by)?;
         try_label(self.svc, &mut self.ticket, WORKING_LABEL).await;
         let branch = self.ticket.branch.clone().unwrap_or_default();
-        let note = format!("Amaru is working on this issue on branch `{branch}`.");
+        let note = if self.ticket.goal == Goal::Analyze {
+            "Amaru is analyzing this issue.".to_owned()
+        } else {
+            format!("Amaru is working on this issue on branch `{branch}`.")
+        };
         self.svc.source.comment(&repo, number, &note).await?;
         Ok(State::Preparing)
     }
@@ -70,7 +78,11 @@ impl Job<'_> {
             .create(&target, &branch, &self.base_ref()?)
             .await?;
         self.ticket.worktree = Some(path);
-        Ok(State::Implementing)
+        Ok(if self.ticket.goal == Goal::Analyze {
+            State::Analyzing
+        } else {
+            State::Implementing
+        })
     }
 
     /// Record the agent's report and turn its status into the next state.

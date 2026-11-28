@@ -1,6 +1,7 @@
 //! The ticket lifecycle: from a claimed issue to a pull request that a
 //! human merges, with review feedback handled in the same agent session.
 
+mod analyze;
 mod guide;
 mod review;
 mod steps;
@@ -231,6 +232,7 @@ impl<'a> Job<'a> {
         match self.ticket.state {
             State::Queued => self.prepare().await,
             State::Preparing => self.create_worktree().await,
+            State::Analyzing => self.analyze().await,
             State::Implementing => self.implement().await,
             State::Checking => self.check().await,
             State::SelfReview => self.self_review().await,

@@ -36,6 +36,38 @@ async fn takes_an_issue_to_a_pull_request_in_one_session() {
 }
 
 #[tokio::test]
+async fn analyzes_a_labelled_issue_and_comments() {
+    let fake = Fake::new("false").await;
+    fake.forge
+        .update_issue(1, |i| i.labels.push("amaru:analyze".into()));
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.goal, crate::ticket::Goal::Analyze);
+    assert_eq!(ticket.state, State::Done);
+    assert!(ticket.worktree.is_none());
+    assert_eq!(ticket.pr_number, None);
+    assert!(fake.prompts()[0].contains("Do not implement it."));
+    assert!(!fake.upstream_has("amaru/1-add-a-feature").await);
+    let forge = fake.forge.state();
+    assert!(forge.prs.is_empty());
+    let last = &forge.comments.last().unwrap().1;
+    assert!(last.contains("Root cause: the parser."), "{last}");
+    assert!(forge.comments[0].1.contains("analyzing this issue"));
+    assert!(!forge.labels.contains(&(1, WORKING_LABEL.to_owned())));
+}
+
+#[tokio::test]
+async fn blocks_an_analysis_without_a_file() {
+    let fake = Fake::new("").await;
+    std::fs::write(fake.dir.path().join("agent/no-analysis"), "").unwrap();
+    let mut ticket = fake.claim(1).await;
+    ticket.goal = crate::ticket::Goal::Analyze;
+    let ticket = drive(&fake, ticket).await;
+    assert_eq!(ticket.state, State::Blocked);
+    assert_eq!(ticket.blocked_from, Some(State::Analyzing));
+    assert!(ticket.reason.unwrap().contains(".amaru/analysis.md"));
+}
+
+#[tokio::test]
 async fn names_a_jira_ticket_by_its_key() {
     let fake = Fake::jira().await;
     fake.forge.update_issue(1, |i| i.key = Some("APP-1".into()));
