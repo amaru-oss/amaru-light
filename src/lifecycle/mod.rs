@@ -3,6 +3,7 @@
 
 mod guide;
 mod review;
+mod screen;
 mod steps;
 mod turn;
 
@@ -190,9 +191,9 @@ impl<'a> Job<'a> {
                 return self.stop(e).await;
             }
             let result = if self.wants_guidance_turn()? {
-                self.follow_guidance().await
+                Box::pin(self.follow_guidance()).await
             } else {
-                self.step().await
+                Box::pin(self.step()).await
             };
             match result {
                 Ok(next) => self.transition(next)?,
@@ -316,6 +317,12 @@ pub fn unblock(ticket: &mut Ticket) {
     ticket.blocked_at = None;
     ticket.labels.retain(|l| l != BLOCKED_LABEL);
     ticket.fix_rounds = 0;
+    // A human looked at the ticket: the text the guard stopped may pass.
+    if let Some(fingerprint) = ticket.guard_rejected.take()
+        && !ticket.guard_allowed.contains(&fingerprint)
+    {
+        ticket.guard_allowed.push(fingerprint);
+    }
     if ticket.state == State::AddressingReview {
         ticket.review_rounds = 0;
     }

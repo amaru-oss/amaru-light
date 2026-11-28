@@ -22,14 +22,20 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 
+[lints]
+workspace = true
+
+[workspace]
+members = [".", "guard"]
+
 # Lint levels copied from the workspace lints of wanaku-ai/wanaku (156f7697).
 # `from_iter_instead_of_collect` is left out: Rust 1.98 removed it.
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "deny"
 unused_imports = "deny"
 unused_variables = "deny"
 
-[lints.clippy]
+[workspace.lints.clippy]
 # Safety: prevent panicking in production code
 unwrap_used = "deny"
 expect_used = "deny"

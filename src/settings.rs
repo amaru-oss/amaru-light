@@ -217,6 +217,97 @@ pub struct DaemonSettings {
     /// The web interface that `amaru serve` starts.
     #[serde(default)]
     pub web: WebSettings,
+    /// The prompt injection guard; on unless `enabled: false`.
+    #[serde(default)]
+    pub guard: GuardSettings,
+}
+
+/// Untrusted text the guard checks before an agent reads it.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardInput {
+    /// The issue title and body; for Jira, the description and comments.
+    Issue,
+    /// Each review, review comment and failed CI check of the pull request.
+    Review,
+    /// The output of a failed project check.
+    Checks,
+}
+
+impl GuardInput {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Issue => "issue",
+            Self::Review => "review",
+            Self::Checks => "checks",
+        }
+    }
+}
+
+/// What happens when the guard gives no answer.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GuardOnError {
+    /// Stop the ticket: no unchecked text reaches the agent.
+    #[default]
+    Block,
+    /// Record the error and pass the text on.
+    Allow,
+}
+
+/// The prompt injection guard: a command that classifies untrusted text
+/// before the daemon gives it to an agent.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuardSettings {
+    /// On by default: turning it off lets any text reach the agent.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// The guard executable.
+    #[serde(default = "default_guard_command")]
+    pub command: String,
+    /// The guard's own settings file, passed as `-c`, relative to the
+    /// daemon file. Without it the guard uses its defaults.
+    #[serde(default)]
+    pub config: Option<PathBuf>,
+    /// Which texts are checked.
+    #[serde(default = "default_guard_inputs")]
+    pub inputs: Vec<GuardInput>,
+    #[serde(default)]
+    pub on_error: GuardOnError,
+    /// The longest a check, or the model download at start, may take.
+    #[serde(default = "default_guard_timeout")]
+    pub timeout: Span,
+}
+
+impl GuardSettings {
+    /// Whether the guard checks this kind of text.
+    pub fn checks(&self, input: GuardInput) -> bool {
+        self.enabled && self.inputs.contains(&input)
+    }
+}
+
+impl Default for GuardSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            command: default_guard_command(),
+            config: None,
+            inputs: default_guard_inputs(),
+            on_error: GuardOnError::default(),
+            timeout: default_guard_timeout(),
+        }
+    }
+}
+
+fn default_guard_command() -> String {
+    "amaru-guard".into()
+}
+fn default_guard_inputs() -> Vec<GuardInput> {
+    vec![GuardInput::Issue, GuardInput::Review]
+}
+const fn default_guard_timeout() -> Span {
+    Span::secs(15 * 60)
 }
 
 /// The web interface and its HTTP API.
@@ -689,6 +780,25 @@ mod tests {
             project.workspace.keep_blocked,
             Retention::For(Duration::from_secs(604_800))
         );
+    }
+
+    #[test]
+    fn the_guard_is_on_unless_turned_off() {
+        let guard = load(DAEMON, PROJECT).unwrap().daemon.guard;
+        assert!(guard.enabled && guard.checks(GuardInput::Issue));
+        assert!(guard.checks(GuardInput::Review) && !guard.checks(GuardInput::Checks));
+        assert_eq!(guard.command, "amaru-guard");
+        assert_eq!(guard.on_error, GuardOnError::Block);
+        let off = load(&format!("{DAEMON}guard: {{enabled: false}}\n"), PROJECT).unwrap();
+        assert!(!off.daemon.guard.checks(GuardInput::Issue));
+        let custom = "guard:\n  config: guard.yaml\n  inputs: [checks]\n  on_error: allow\n";
+        let guard = load(&format!("{DAEMON}{custom}"), PROJECT)
+            .unwrap()
+            .daemon
+            .guard;
+        assert!(guard.checks(GuardInput::Checks) && !guard.checks(GuardInput::Issue));
+        assert_eq!(guard.on_error, GuardOnError::Allow);
+        assert!(load(&format!("{DAEMON}guard: {{treshold: 9}}\n"), PROJECT).is_err());
     }
 
     #[test]

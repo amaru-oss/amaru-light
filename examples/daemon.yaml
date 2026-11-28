@@ -26,3 +26,13 @@ agents:
 
 projects:
   - project.yaml
+
+# The prompt guard checks issue text and review comments with a local
+# classifier before an agent reads them. It is on unless `enabled: false`;
+# the first start downloads its model (about 300 MB) into
+# ~/.cache/amaru-guard. See docs/prompt-guard.md.
+# guard:
+#   enabled: true
+#   config: guard.yaml        # the guard's own settings, relative to this file
+#   inputs: [issue, review]   # add `checks` for failed check output
+#   on_error: block

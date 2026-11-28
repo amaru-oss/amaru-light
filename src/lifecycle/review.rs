@@ -159,7 +159,7 @@ impl Job<'_> {
             .pr_number
             .context("ticket has no pull request")?;
         let pr = self.svc.forge.pr(&self.ticket.repo, number).await?;
-        let feedback = pending(self.svc, self.project, &self.ticket, &pr).await?;
+        let feedback = Box::pin(self.screened_feedback(&pr)).await?;
         if feedback.is_empty() {
             return Ok(State::AwaitingReview);
         }
@@ -182,6 +182,12 @@ impl Job<'_> {
             .handled_feedback
             .extend(feedback.into_iter().map(|f| f.id));
         Ok(State::AwaitingReview)
+    }
+
+    /// The new feedback that the guard lets through.
+    async fn screened_feedback(&mut self, pr: &PullRequest) -> Result<Vec<Feedback>> {
+        let feedback = pending(self.svc, self.project, &self.ticket, pr).await?;
+        self.screen_feedback(pr.number, feedback).await
     }
 
     /// React to feedback that arrived after the poll, and remember it.

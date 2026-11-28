@@ -25,7 +25,8 @@ credentials and local account configuration outside the build context.
 
 Run `make image` in the Amaru Light source checkout to build
 `localhost/amaru-light:latest`. The current tag uses Fedora Minimal 45 and
-includes the `amaru` binary, Git, GitHub CLI, and
+includes the `amaru` binary, the [prompt guard](prompt-guard.md)
+`amaru-guard`, Git, GitHub CLI, and
 [ripwire](https://github.com/redhat-et/ripwire), a code map tool that helps
 agents find relevant code with fewer tokens. The runtime username is still
 `mini-amaru`.
@@ -151,7 +152,8 @@ podman logs -f amaru-light-my-project
 ```
 
 The volumes hold the daemon state (database, clones and worktrees) and the
-runtime user's home directory. Use project-specific volume names, and use
+runtime user's home directory, where the prompt guard keeps its model
+(`~/.cache/amaru-guard`, downloaded at the first start). Use project-specific volume names, and use
 named volumes rather than host directories for them. Leave out the `/config`
 mount if the image copies the settings. `-p 127.0.0.1:8765:8765` publishes
 the web interface on the host's loopback only, at <http://127.0.0.1:8765>.

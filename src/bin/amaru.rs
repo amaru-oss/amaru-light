@@ -6,6 +6,7 @@ use amaru_light::{
     app::services,
     cleanup,
     forge::jira::{Curl, Jira},
+    guard::Guard,
     lifecycle::Services,
     process,
     scheduler::{Intake, Scheduler},
@@ -122,9 +123,25 @@ async fn dispatch(cli: Cli) -> Result<()> {
     }
 }
 
+/// Get the guard's model before any work starts. Without a working guard no
+/// ticket may run, so a failure stops the daemon; `guard: {enabled: false}`
+/// in the daemon file turns the guard off.
+async fn prepare_guard(svc: &Services) -> Result<()> {
+    let Some(guard) = Guard::of(&svc.settings) else {
+        eprintln!("warning: the prompt guard is off; any issue text reaches the agent");
+        return Ok(());
+    };
+    eprintln!("preparing the prompt guard (the first start downloads its model)");
+    guard.download().await.context(
+        "the prompt guard is not ready; install amaru-guard, \
+         or set `guard: {enabled: false}` in the daemon file",
+    )
+}
+
 /// Run the scheduler, and with `web` the web page, until the scheduler is
 /// done or Ctrl-C is pressed.
 async fn run(svc: Arc<Services>, intake: Intake, web: bool) -> Result<()> {
+    prepare_guard(&svc).await?;
     let (stop, stop_rx) = watch::channel(false);
     let server = if web && svc.settings.daemon.web.enabled {
         Some(amaru_light::web::start(Arc::clone(&svc), stop_rx.clone()).await?)
@@ -297,6 +314,12 @@ async fn doctor(config: &std::path::Path) -> Result<()> {
         ok &= signed_in(name, agent).await;
     }
     ok &= check_jira(&settings).await;
+    let guard = &settings.daemon.guard;
+    if guard.enabled {
+        ok &= probe("guard", &guard.command, &["--version"]).await;
+    } else {
+        println!("off   guard: any issue text reaches the agent");
+    }
     if !ok {
         bail!("some checks failed");
     }

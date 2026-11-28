@@ -5,9 +5,11 @@ FROM docker.io/library/rust:1.98-bookworm AS backend
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src/ src/
+COPY guard/ guard/
 COPY prompts/ prompts/
 COPY web/ web/
-RUN cargo build --release --locked --bin amaru
+# amaru-guard links a prebuilt ONNX Runtime that the build downloads.
+RUN cargo build --release --locked -p amaru-light -p amaru-guard
 
 # ripwire (https://github.com/redhat-et/ripwire), a code map tool that lets
 # agents find the code for a task in few tokens. It is built on the same
@@ -42,6 +44,9 @@ COPY --from=ripwire /out/share/ripwire/ /usr/local/share/ripwire/
 
 WORKDIR /app
 COPY --from=backend /build/target/release/amaru bin/amaru
+# The prompt guard, on PATH where the daemon looks for it by default. Its
+# model is downloaded at the first start into ~/.cache/amaru-guard.
+COPY --from=backend /build/target/release/amaru-guard /usr/local/bin/amaru-guard
 COPY examples/ examples/
 COPY packaging/container-entrypoint.sh entrypoint
 # Mount the settings at /config and keep the state (database, mirrors,

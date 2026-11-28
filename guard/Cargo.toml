@@ -1,0 +1,38 @@
+[package]
+name = "amaru-guard"
+version = "0.1.0"
+edition = "2024"
+description = "Prompt injection guard for Amaru Light: classifies untrusted text with a local model"
+license = "Apache-2.0"
+
+[[bin]]
+name = "amaru-guard"
+path = "src/main.rs"
+
+[features]
+default = ["download-binaries"]
+# Link a prebuilt ONNX Runtime that the build downloads (the usual setup).
+download-binaries = ["ort/download-binaries"]
+# Load ONNX Runtime at run time from ORT_DYLIB_PATH instead, for hosts that
+# cannot download it at build time.
+load-dynamic = ["ort/load-dynamic"]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+half = "2"
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["half"] }
+# ort 2.0.0-rc.9 does not build with ort-sys rc.10.
+ort-sys = { version = "=2.0.0-rc.9", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+tokenizers = { version = "0.23", default-features = false, features = ["unstable_wasm"] }
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

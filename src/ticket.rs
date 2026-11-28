@@ -141,6 +141,13 @@ pub struct Ticket {
     /// label resumes the ticket only when it is listed here.
     #[serde(default)]
     pub labels: Vec<String>,
+    /// The fingerprint of the text the guard stopped the ticket on. A human
+    /// who unblocks the ticket lets that text through.
+    #[serde(default)]
+    pub guard_rejected: Option<String>,
+    /// Fingerprints of texts a human let through after the guard stopped them.
+    #[serde(default)]
+    pub guard_allowed: Vec<String>,
 }
 
 impl Ticket {
@@ -171,6 +178,8 @@ impl Ticket {
             complete: false,
             self_reviewed: false,
             labels: Vec::new(),
+            guard_rejected: None,
+            guard_allowed: Vec::new(),
         }
     }
 

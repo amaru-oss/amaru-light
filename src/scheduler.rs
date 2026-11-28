@@ -100,7 +100,7 @@ impl Scheduler {
         self.check_agents().await;
         self.claim_new().await?;
         for ticket in self.svc.store.unfinished()? {
-            if let Err(e) = self.maintain(ticket).await {
+            if let Err(e) = Box::pin(self.maintain(ticket)).await {
                 log(&format!("ticket update failed: {e:#}"));
             }
         }

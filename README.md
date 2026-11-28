@@ -131,6 +131,9 @@ daemon then works without the labels, and you unblock a ticket with
   `BOB_API_KEY`). The agent runs
   unattended in its worktree, so it must be allowed to run the project's
   build and tests without asking.
+- `amaru-guard`, the [prompt guard](docs/prompt-guard.md), on `PATH`; the
+  container image and the packages include it. Its first start downloads a
+  model of about 300 MB from Hugging Face.
 - Rust (see `rust-toolchain.toml`) to build from source.
 
 ## Quick start
@@ -230,6 +233,11 @@ in a container or a VM, with a bot token that can only reach the repositories
 it works on. The daemon pushes only to the branches it created and never
 merges.
 
+The [prompt guard](docs/prompt-guard.md), on by default, checks issue text
+and review feedback with a local prompt injection classifier before the
+agent reads them; a flagged issue stops its ticket until a human looks at
+it.
+
 ## Development
 
 ```sh
@@ -256,6 +264,8 @@ the Rust stage of the `Containerfile`.
 | `forge` | GitHub issues and pull requests through `gh`, Jira issues through `curl` |
 | `worktree.rs`, `checks.rs`, `process.rs` | Git, checks and child processes |
 | `db.rs`, `ticket.rs`, `settings.rs` | State and configuration |
+| `guard.rs`, `lifecycle/screen.rs` | Running the prompt guard on untrusted text |
+| `guard/` (crate `amaru-guard`) | The prompt guard: model download and ONNX inference |
 
 ### Continuous integration
 
