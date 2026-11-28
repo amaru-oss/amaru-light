@@ -88,7 +88,7 @@ function stamp(iso) {
 }
 
 const GROUPS = {
-  QUEUED: "active", PREPARING: "active", IMPLEMENTING: "active", CHECKING: "active",
+  QUEUED: "active", PREPARING: "active", ANALYZING: "active", IMPLEMENTING: "active", CHECKING: "active",
   SELF_REVIEW: "active", PUBLISHING: "active", ADDRESSING_REVIEW: "active",
   AWAITING_REVIEW: "review", BLOCKED: "blocked", DONE: "done", CANCELLED: "cancelled",
 };

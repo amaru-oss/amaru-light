@@ -49,7 +49,7 @@ any step → BLOCKED (with the reason on the issue) → resumes when unblocked
 | --- | --- | --- |
 | Autonomous | `amaru serve` | Issues with one of the project's `intake.labels` and/or assigned to `intake.assignee` |
 | Milestone | `amaru drain owner/name --milestone "v1.2"` | Every open issue of the milestone, then the command exits |
-| Manual | `amaru claim owner/name#42 [--now]`, or `amaru claim CAMEL-12345` for a [Jira project](docs/jira.md) | One issue you pick |
+| Manual | `amaru claim owner/name#42 [--now] [--analyze]`, or `amaru claim CAMEL-12345` for a [Jira project](docs/jira.md) | One issue you pick |
 
 Issues with a skip label (`amaru:hold`, `needs-human` by default) are left
 alone. Priority labels, then the milestone due date, then age decide the

@@ -77,6 +77,11 @@ PUBLISHING -> AWAITING_REVIEW -> DONE (a human merged the PR)
 Any state -> BLOCKED (reason posted on the issue) | CANCELLED
 ```
 
+An issue with the project's `intake.analyze_label` (off by default), or one
+claimed with `--analyze`, takes a
+shorter path: `PREPARING -> ANALYZING -> DONE`. The agent writes
+`.amaru/analysis.md`, the daemon posts it on the issue, and nothing is pushed.
+
 `IMPLEMENTING`, check fixes and `ADDRESSING_REVIEW` share one resumable
 session. A ticket in `AWAITING_REVIEW` does not use a worker slot.
 

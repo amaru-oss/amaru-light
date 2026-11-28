@@ -197,10 +197,14 @@ async fn events(
 #[derive(Debug, Deserialize)]
 struct ClaimBody {
     issue: String,
+    /// Analyze the issue and comment on it instead of implementing it.
+    #[serde(default)]
+    analyze: bool,
 }
 
 async fn claim(State(web): State<Web>, Json(body): Json<ClaimBody>) -> Response {
-    let (status, outcome, ticket) = match actions::claim(&web.svc, &body.issue).await {
+    let (status, outcome, ticket) = match actions::claim(&web.svc, &body.issue, body.analyze).await
+    {
         Ok(Claimed::Queued(t)) => (StatusCode::CREATED, "queued", t),
         Ok(Claimed::Exists(t)) => (StatusCode::OK, "exists", t),
         Err(e) => return ApiError::rejected(&e).into_response(),

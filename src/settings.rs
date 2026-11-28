@@ -258,7 +258,7 @@ fn default_gh() -> String {
 }
 
 /// Which issues the autonomous mode picks up.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IntakeSettings {
     /// An issue with any of these labels is eligible.
@@ -272,6 +272,23 @@ pub struct IntakeSettings {
     /// Labels that move an issue to the front, highest first.
     #[serde(default)]
     pub priority_labels: Vec<String>,
+    /// An issue with this label is analyzed and gets the analysis as a
+    /// comment, instead of being implemented. It is picked up like `labels`.
+    /// Not set: no issue is analyzed because of a label.
+    #[serde(default)]
+    pub analyze_label: Option<String>,
+}
+
+impl Default for IntakeSettings {
+    fn default() -> Self {
+        Self {
+            labels: Vec::new(),
+            assignee: None,
+            skip_labels: default_skip_labels(),
+            priority_labels: Vec::new(),
+            analyze_label: None,
+        }
+    }
 }
 
 fn default_skip_labels() -> Vec<String> {

@@ -9,6 +9,8 @@ use std::{fmt, path::PathBuf};
 pub enum State {
     Queued,
     Preparing,
+    /// Analyzing the issue and commenting on it, instead of implementing.
+    Analyzing,
     Implementing,
     Checking,
     SelfReview,
@@ -21,9 +23,10 @@ pub enum State {
 }
 
 impl State {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Queued,
         Self::Preparing,
+        Self::Analyzing,
         Self::Implementing,
         Self::Checking,
         Self::SelfReview,
@@ -46,6 +49,7 @@ impl State {
             self,
             Self::Queued
                 | Self::Preparing
+                | Self::Analyzing
                 | Self::Implementing
                 | Self::Checking
                 | Self::SelfReview
@@ -58,6 +62,7 @@ impl State {
         match self {
             Self::Queued => "QUEUED",
             Self::Preparing => "PREPARING",
+            Self::Analyzing => "ANALYZING",
             Self::Implementing => "IMPLEMENTING",
             Self::Checking => "CHECKING",
             Self::SelfReview => "SELF_REVIEW",
@@ -79,6 +84,17 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+/// What a ticket does with its issue.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Goal {
+    /// Implement it and open a pull request.
+    #[default]
+    Implement,
+    /// Analyze it and post the analysis as a comment.
+    Analyze,
 }
 
 /// How a ticket entered the queue.
@@ -105,6 +121,9 @@ pub struct Ticket {
     #[serde(default)]
     pub body: String,
     pub origin: Origin,
+    /// What the ticket does with its issue.
+    #[serde(default)]
+    pub goal: Goal,
     pub state: State,
     /// Why the ticket is blocked, or what it waits for.
     pub reason: Option<String>,
@@ -153,6 +172,7 @@ impl Ticket {
             title,
             body: String::new(),
             origin,
+            goal: Goal::Implement,
             state: State::Queued,
             reason: None,
             branch: None,

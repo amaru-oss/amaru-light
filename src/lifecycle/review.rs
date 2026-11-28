@@ -103,6 +103,12 @@ async fn finish(svc: &Services, ticket: &mut Ticket) -> Result<()> {
     svc.store.save(ticket)?;
     svc.store
         .event(ticket.id, "STATE", &json!({ "to": State::Done }))?;
+    release(svc, ticket).await
+}
+
+/// Let go of a ticket whose work is over: the issue loses the working label
+/// and the worktree is deleted.
+pub(super) async fn release(svc: &Services, ticket: &mut Ticket) -> Result<()> {
     svc.source
         .remove_label(&ticket.repo, ticket.number, WORKING_LABEL)
         .await?;

@@ -51,6 +51,8 @@ mkdir -p .amaru
 case "$prompt" in
   *"stepped in on your work"*) touch guided.txt; c add guided.txt; c commit -qm guided
     echo '{"status":"done","summary":"Followed the guidance"}' > .amaru/result.json ;;
+  *"You are analyzing issue"*) if [ ! -f "$dir/no-analysis" ]; then printf 'Root cause: the parser.\n' > .amaru/analysis.md; fi
+    echo '{"status":"done","summary":"Analyzed"}' > .amaru/result.json ;;
   *"You are working on issue"*) echo done >> feature.txt; c add feature.txt; c commit -qm feature
     echo '{"status":"done","summary":"Added the feature","complete":true}' > .amaru/result.json ;;
   *"project check"*) touch fixed.txt; c add fixed.txt; c commit -qm fix
@@ -311,9 +313,19 @@ fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
     } else {
         format!("checks:\n  - {{name: check, run: \"{check}\"}}\n")
     };
-    std::fs::write(root.join("project.yaml"), format!(
-        "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}{extra}"
-    )).unwrap();
+    // A project may bring its own intake.
+    let intake = if extra.contains("intake:") {
+        ""
+    } else {
+        "intake: {labels: [amaru]}\n"
+    };
+    std::fs::write(
+        root.join("project.yaml"),
+        format!(
+            "repo: me/app\nagent: claude\n{intake}review: {{reviewers: [me]}}\n{checks}{extra}"
+        ),
+    )
+    .unwrap();
     let daemon = format!(
         "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
         agent.display()

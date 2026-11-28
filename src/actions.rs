@@ -4,7 +4,7 @@ use crate::{
     app::parse_issue,
     lifecycle::{BLOCKED_LABEL, Services, unblock},
     settings::ProjectSettings,
-    ticket::{Origin, State, Ticket},
+    ticket::{Goal, Origin, State, Ticket},
 };
 use anyhow::{Context, Result, bail};
 
@@ -40,8 +40,9 @@ fn resolve<'a>(svc: &'a Services, reference: &str) -> Result<(&'a ProjectSetting
 }
 
 /// Queue an issue as a manual ticket: `owner/name#42`, its URL, or a Jira
-/// key such as `CAMEL-12345`.
-pub async fn claim(svc: &Services, reference: &str) -> Result<Claimed> {
+/// key such as `CAMEL-12345`. With `analyze`, the ticket analyzes the issue
+/// and comments on it instead of implementing it.
+pub async fn claim(svc: &Services, reference: &str, analyze: bool) -> Result<Claimed> {
     let (project, number) = resolve(svc, reference)?;
     let repo = project.repo.clone();
     let name = project.issue_name(number);
@@ -53,7 +54,13 @@ pub async fn claim(svc: &Services, reference: &str) -> Result<Claimed> {
         bail!("{name} is closed");
     }
     match svc.store.claim_issue(&repo, &issue, Origin::Manual)? {
-        Some(ticket) => Ok(Claimed::Queued(ticket)),
+        Some(mut ticket) => {
+            if analyze {
+                ticket.goal = Goal::Analyze;
+                svc.store.save(&ticket)?;
+            }
+            Ok(Claimed::Queued(ticket))
+        }
         None => {
             let existing = svc.store.open_ticket(&repo, number)?;
             Ok(Claimed::Exists(existing.context("ticket vanished")?))
@@ -137,18 +144,29 @@ mod tests {
     use crate::testing::Fake;
 
     #[tokio::test]
+    async fn claims_an_issue_for_analysis() {
+        let fake = Fake::new("").await;
+        let Claimed::Queued(ticket) = claim(&fake.svc, "me/app#6", true).await.unwrap() else {
+            unreachable!("a new issue is queued")
+        };
+        assert_eq!(ticket.goal, Goal::Analyze);
+        let stored = fake.svc.store.get(ticket.id).unwrap().unwrap();
+        assert_eq!(stored.goal, Goal::Analyze);
+    }
+
+    #[tokio::test]
     async fn claims_resumes_and_cancels() {
         let fake = Fake::new("").await;
-        let Claimed::Queued(ticket) = claim(&fake.svc, " me/app#5 ").await.unwrap() else {
+        let Claimed::Queued(ticket) = claim(&fake.svc, " me/app#5 ", false).await.unwrap() else {
             unreachable!("a new issue is queued")
         };
         assert_eq!(ticket.number, 5);
         assert!(matches!(
-            claim(&fake.svc, "me/app#5").await.unwrap(),
+            claim(&fake.svc, "me/app#5", false).await.unwrap(),
             Claimed::Exists(_)
         ));
-        assert!(claim(&fake.svc, "other/app#5").await.is_err());
-        assert!(claim(&fake.svc, "me/app").await.is_err());
+        assert!(claim(&fake.svc, "other/app#5", false).await.is_err());
+        assert!(claim(&fake.svc, "me/app", false).await.is_err());
         assert!(resume(&fake.svc, ticket.id).await.is_err());
         let mut blocked = ticket.clone();
         blocked.state = State::Blocked;
@@ -170,19 +188,20 @@ mod tests {
         let fake = Fake::jira().await;
         fake.forge
             .update_issue(12, |i| i.key = Some("APP-12".into()));
-        let Claimed::Queued(ticket) = claim(&fake.svc, "https://jira.example.com/browse/APP-12")
-            .await
-            .unwrap()
+        let Claimed::Queued(ticket) =
+            claim(&fake.svc, "https://jira.example.com/browse/APP-12", false)
+                .await
+                .unwrap()
         else {
             unreachable!("a new issue is queued")
         };
         assert_eq!((ticket.repo.as_str(), ticket.number), ("me/app", 12));
         assert_eq!(ticket.reference(), "APP-12");
         assert!(matches!(
-            claim(&fake.svc, "app-12").await.unwrap(),
+            claim(&fake.svc, "app-12", false).await.unwrap(),
             Claimed::Exists(_)
         ));
-        let err = claim(&fake.svc, "me/app#12").await.unwrap_err();
+        let err = claim(&fake.svc, "me/app#12", false).await.unwrap_err();
         assert!(format!("{err:#}").contains("claim APP-12 instead"));
     }
 
@@ -190,6 +209,6 @@ mod tests {
     async fn refuses_a_closed_issue() {
         let fake = Fake::new("").await;
         fake.forge.update_issue(9, |i| i.open = false);
-        assert!(claim(&fake.svc, "me/app#9").await.is_err());
+        assert!(claim(&fake.svc, "me/app#9", false).await.is_err());
     }
 }

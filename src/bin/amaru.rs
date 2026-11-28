@@ -42,6 +42,9 @@ enum Command {
         issue: String,
         #[arg(long)]
         now: bool,
+        /// Analyze the issue and comment on it instead of implementing it.
+        #[arg(long)]
+        analyze: bool,
     },
     /// Work through the open issues of a milestone, then stop.
     Drain {
@@ -105,7 +108,11 @@ async fn dispatch(cli: Cli) -> Result<()> {
     let svc = services(&cli.config)?;
     match cli.command {
         Command::Serve => run(svc, Intake::Autonomous, true).await,
-        Command::Claim { issue, now } => Box::pin(claim(svc, &issue, now)).await,
+        Command::Claim {
+            issue,
+            now,
+            analyze,
+        } => Box::pin(claim(svc, &issue, now, analyze)).await,
         Command::Drain { repo, milestone } => {
             run(svc, Intake::Milestone { repo, milestone }, false).await
         }
@@ -153,8 +160,8 @@ async fn run(svc: Arc<Services>, intake: Intake, web: bool) -> Result<()> {
     result
 }
 
-async fn claim(svc: Arc<Services>, reference: &str, now: bool) -> Result<()> {
-    match actions::claim(&svc, reference).await? {
+async fn claim(svc: Arc<Services>, reference: &str, now: bool, analyze: bool) -> Result<()> {
+    match actions::claim(&svc, reference, analyze).await? {
         Claimed::Queued(t) => println!("queued {} as ticket {}", t.reference(), t.id),
         Claimed::Exists(t) => println!(
             "{} already has an unfinished ticket: {} ({})",
