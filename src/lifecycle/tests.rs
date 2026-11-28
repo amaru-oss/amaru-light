@@ -37,7 +37,11 @@ async fn takes_an_issue_to_a_pull_request_in_one_session() {
 
 #[tokio::test]
 async fn analyzes_a_labelled_issue_and_comments() {
-    let fake = Fake::new("false").await;
+    let fake = Fake::with_project(
+        "false",
+        "intake: {labels: [amaru], analyze_label: \"amaru:analyze\"}\n",
+    )
+    .await;
     fake.forge
         .update_issue(1, |i| i.labels.push("amaru:analyze".into()));
     let ticket = drive(&fake, fake.claim(1).await).await;
@@ -53,6 +57,16 @@ async fn analyzes_a_labelled_issue_and_comments() {
     assert!(last.contains("Root cause: the parser."), "{last}");
     assert!(forge.comments[0].1.contains("analyzing this issue"));
     assert!(!forge.labels.contains(&(1, WORKING_LABEL.to_owned())));
+}
+
+#[tokio::test]
+async fn implements_a_labelled_issue_when_analysis_is_off() {
+    let fake = Fake::new("").await;
+    fake.forge
+        .update_issue(1, |i| i.labels.push("amaru:analyze".into()));
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.goal, crate::ticket::Goal::Implement);
+    assert_eq!(ticket.state, State::AwaitingReview);
 }
 
 #[tokio::test]

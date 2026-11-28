@@ -313,9 +313,19 @@ fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
     } else {
         format!("checks:\n  - {{name: check, run: \"{check}\"}}\n")
     };
-    std::fs::write(root.join("project.yaml"), format!(
-        "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}{extra}"
-    )).unwrap();
+    // A project may bring its own intake.
+    let intake = if extra.contains("intake:") {
+        ""
+    } else {
+        "intake: {labels: [amaru]}\n"
+    };
+    std::fs::write(
+        root.join("project.yaml"),
+        format!(
+            "repo: me/app\nagent: claude\n{intake}review: {{reviewers: [me]}}\n{checks}{extra}"
+        ),
+    )
+    .unwrap();
     let daemon = format!(
         "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
         agent.display()

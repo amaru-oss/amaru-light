@@ -35,7 +35,7 @@ impl Scheduler {
 
     async fn autonomous(&self, project: &ProjectSettings) -> Result<Vec<Issue>> {
         let mut labels = project.intake.labels.clone();
-        labels.push(project.intake.analyze_label.clone());
+        labels.extend(project.intake.analyze_label.clone());
         let selector = Selector {
             labels,
             assignee: project.intake.assignee.clone(),

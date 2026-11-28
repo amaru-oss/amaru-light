@@ -232,7 +232,7 @@ Issues claimed by hand (`amaru claim`) or through a milestone
 | `assignee` | none | An open issue assigned to this login is eligible. GitHub only lets you assign people who have access to the repository. |
 | `skip_labels` | `[amaru:hold, needs-human]` | Issues with any of these labels are never started. Setting this list replaces the default, so keep `amaru:hold` in it if you want it. |
 | `priority_labels` | `[]` | Issues with these labels go first, in the order listed. Then the milestone due date decides, then age. |
-| `analyze_label` | `amaru:analyze` | An issue with this label is analyzed instead of implemented: the agent reads the code, writes an analysis and the daemon posts it as a comment on the issue. No branch is pushed and no pull request is opened. The label also makes an issue eligible, like `labels`. `amaru claim --analyze` does the same for one issue, also in a Jira project. |
+| `analyze_label` | none (off) | An issue with this label, for example `amaru:analyze`, is analyzed instead of implemented: the agent reads the code, writes an analysis and the daemon posts it as a comment on the issue. No branch is pushed and no pull request is opened. The label also makes an issue eligible, like `labels`. `amaru claim --analyze` does the same for one issue, also in a Jira project. |
 
 An issue whose body says `Depends on #12` or `Blocked by #12` starts only
 once #12 has a pull request, on a branch stacked on #12's branch.

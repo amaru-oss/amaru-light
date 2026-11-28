@@ -18,8 +18,8 @@ impl Job<'_> {
         if !issue.open {
             return Ok(State::Cancelled);
         }
-        let label = &self.project.intake.analyze_label;
-        if issue.labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
+        let label = self.project.intake.analyze_label.as_deref();
+        if label.is_some_and(|a| issue.labels.iter().any(|l| l.eq_ignore_ascii_case(a))) {
             self.ticket.goal = Goal::Analyze;
         }
         self.ticket.title = issue.title;

@@ -274,8 +274,9 @@ pub struct IntakeSettings {
     pub priority_labels: Vec<String>,
     /// An issue with this label is analyzed and gets the analysis as a
     /// comment, instead of being implemented. It is picked up like `labels`.
-    #[serde(default = "default_analyze_label")]
-    pub analyze_label: String,
+    /// Not set: no issue is analyzed because of a label.
+    #[serde(default)]
+    pub analyze_label: Option<String>,
 }
 
 impl Default for IntakeSettings {
@@ -285,13 +286,9 @@ impl Default for IntakeSettings {
             assignee: None,
             skip_labels: default_skip_labels(),
             priority_labels: Vec::new(),
-            analyze_label: default_analyze_label(),
+            analyze_label: None,
         }
     }
-}
-
-fn default_analyze_label() -> String {
-    "amaru:analyze".into()
 }
 
 fn default_skip_labels() -> Vec<String> {
