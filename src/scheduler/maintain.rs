@@ -2,7 +2,7 @@
 
 use super::{Scheduler, has_label, lock, log};
 use crate::{
-    lifecycle::{BLOCKED_LABEL, poll_review, unblock},
+    lifecycle::{BLOCKED_LABEL, poll_review, state_after_change, unblock},
     settings::Retention,
     ticket::{State, Ticket},
 };
@@ -44,10 +44,10 @@ impl Scheduler {
     /// Wake a ticket that waits for review because the operator has guidance
     /// for its agent: it runs the guidance turn and the checks, and pushes.
     fn take_guidance(&self, mut ticket: Ticket) -> Result<()> {
-        ticket.state = State::Checking;
+        ticket.state = state_after_change(&self.svc, ticket.clone())?;
         log(&format!("{}: guidance for the agent", ticket.reference()));
         self.svc.store.save(&ticket)?;
-        let payload = serde_json::json!({ "from": State::AwaitingReview, "to": State::Checking });
+        let payload = serde_json::json!({ "from": State::AwaitingReview, "to": ticket.state });
         self.svc.store.event(ticket.id, "STATE", &payload)
     }
 

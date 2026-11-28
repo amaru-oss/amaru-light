@@ -12,8 +12,9 @@ use crate::{
     login::SignIns,
     process::Cancel,
     prompts::Prompts,
-    settings::{ProjectSettings, Settings},
+    settings::{ProjectSettings, SelfReview, Settings},
     ticket::{State, Ticket},
+    workflow::{Step, Workflow},
     worktree::Workspace,
 };
 use anyhow::{Context, Result};
@@ -83,11 +84,14 @@ pub struct Job<'a> {
 }
 
 impl<'a> Job<'a> {
-    pub fn new(svc: &'a Services, ticket: Ticket, cancel: Option<Cancel>) -> Result<Self> {
+    pub fn new(svc: &'a Services, mut ticket: Ticket, cancel: Option<Cancel>) -> Result<Self> {
         let project = svc
             .settings
             .project(&ticket.repo)
             .with_context(|| format!("{} is not a configured project", ticket.repo))?;
+        if ticket.workflow.is_empty() {
+            ticket.workflow.clone_from(&project.workflow);
+        }
         Ok(Self {
             svc,
             project,
@@ -98,6 +102,27 @@ impl<'a> Job<'a> {
 
     pub fn into_ticket(self) -> Ticket {
         self.ticket
+    }
+
+    /// The workflow this ticket follows.
+    fn workflow(&self) -> Result<&'a Workflow> {
+        self.svc.settings.workflow(&self.ticket.workflow)
+    }
+
+    /// The state after `step`: the next step of the workflow that applies to
+    /// this ticket, or done. Self-review runs once, and only when it is on.
+    fn next(&self, step: Step) -> Result<State> {
+        let review = self.project.review.self_review != SelfReview::Off;
+        let reviewed = self.ticket.self_reviewed;
+        Ok(self
+            .workflow()?
+            .after(step, |s| s != Step::SelfReview || (review && !reviewed)))
+    }
+
+    /// Where a change made after implementing goes: through the checks when
+    /// the workflow has them, then on as after implementing.
+    fn after_change(&self) -> Result<State> {
+        self.next(Step::Implement)
     }
 
     fn target(&self) -> Target {
@@ -189,10 +214,11 @@ impl<'a> Job<'a> {
             if let Err(e) = self.ensure_worktree().await {
                 return self.stop(e).await;
             }
+            // Boxed: each step's future is large, and the job lives long.
             let result = if self.wants_guidance_turn()? {
-                self.follow_guidance().await
+                Box::pin(self.follow_guidance()).await
             } else {
-                self.step().await
+                Box::pin(self.step()).await
             };
             match result {
                 Ok(next) => self.transition(next)?,
@@ -307,6 +333,12 @@ pub async fn try_label(svc: &Services, ticket: &mut Ticket, label: &str) -> bool
             false
         }
     }
+}
+
+/// Where a ticket goes after its code changed outside its own steps, for
+/// example when the operator's guidance wakes it from waiting for review.
+pub fn state_after_change(svc: &Services, ticket: Ticket) -> Result<State> {
+    Job::new(svc, ticket, None)?.after_change()
 }
 
 /// Resume a blocked ticket where it stopped, with fresh fix budgets.

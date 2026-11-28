@@ -101,7 +101,7 @@ impl Job<'_> {
         self.ticket.fix_rounds = 0;
         let agent = self.project.agent.clone();
         let report = self.turn(&agent, &prompt, Session::Ticket).await?;
-        let next = self.accept(report, State::Checking).await?;
+        let next = self.accept(report, self.after_change()?).await?;
         self.commit_leftovers("Follow the operator's guidance")
             .await?;
         self.require_commits().await?;

@@ -54,6 +54,7 @@ projects:
 | `web.listen` | `127.0.0.1:8765` | The address and port of the web interface. Use `0.0.0.0:8765` in a container, and set `AMARU_WEB_TOKEN` when anyone else can reach the port. |
 | `agents` | required | The agent CLIs, by a name of your choice. Projects refer to that name. |
 | `projects` | required | The project files. |
+| `workflows` | none | Workflows besides the built-in `code`, by name. See [Workflows](#workflows). |
 
 ### Agents
 
@@ -216,6 +217,7 @@ workspace:
 | `checks` | `[]` | Commands the daemon runs itself after each agent turn, in order, through `sh -c` in the ticket's worktree. |
 | `max_fix_rounds` | `3` | How many times failing checks go back to the agent before the ticket blocks. |
 | `jira` | none | Take the tickets from a Jira project instead of the repository's GitHub issues. See [Jira](#jira) below. |
+| `workflow` | `code` | The workflow this project's tickets follow. See [Workflows](#workflows). |
 
 ### Intake
 
@@ -275,6 +277,38 @@ explains what changes for these tickets.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `keep_blocked` | `7d` | How long the worktree of a blocked ticket is kept: a duration, `0` or `forever`. The branch is kept either way. Unblocking recreates the worktree from it. Worktrees of done and cancelled tickets are always deleted on the next poll; see `amaru clean`. |
+
+### Workflows
+
+A workflow is the list of steps a ticket goes through once its worktree is
+ready. The built-in `code` workflow runs every step:
+
+| Step | What happens |
+| --- | --- |
+| `implement` | The agent implements the issue and commits on the ticket's branch. |
+| `check` | The daemon runs the project's `checks`; failures go back to the agent, up to `max_fix_rounds`. |
+| `self_review` | An independent session reviews the change, when `review.self` is not `off`. |
+| `publish` | The daemon pushes the branch and opens the pull request. |
+| `review_loop` | The daemon follows the pull request and hands review feedback to the agent until a human merges it. |
+
+Other workflows are defined in the daemon file and chosen per project:
+
+```yaml
+# daemon file
+workflows:
+  quick: [implement, publish]   # no checks, done once the pull request is open
+```
+
+```yaml
+# project file
+workflow: quick
+```
+
+Steps keep the order of the table above and appear at most once. A workflow
+needs `implement` and `publish`. A step that is left out is skipped: without
+`check`, neither the first change nor later review fixes run the checks;
+without `review_loop`, the ticket is done when its pull request is open. A
+ticket keeps the workflow it started with; `code` cannot be redefined.
 
 ## Prompts
 

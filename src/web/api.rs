@@ -118,11 +118,18 @@ fn project(svc: &Services, p: &ProjectSettings) -> Value {
         .into_iter()
         .filter(|a| !svc.sign_ins.ready(a))
         .collect();
+    let steps: Vec<&str> = svc
+        .settings
+        .workflow(&p.workflow)
+        .map(|w| w.steps.iter().map(|s| s.as_str()).collect())
+        .unwrap_or_default();
     json!({
         "repo": p.repo,
         "fork": p.fork,
         "jira": p.jira.as_ref().map(|j| format!("{} ({})", j.project, j.url)),
         "base_branch": p.base_branch,
+        "workflow": p.workflow,
+        "steps": steps,
         "agent": p.agent,
         "labels": p.intake.labels,
         "assignee": p.intake.assignee,

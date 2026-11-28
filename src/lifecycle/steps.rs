@@ -1,12 +1,15 @@
 //! The steps from a claimed issue to an open pull request.
 
-use super::{Job, WORKING_LABEL, blocked, try_label, turn::Session, turn::as_refs};
+use super::{
+    Job, WORKING_LABEL, blocked, review::release, try_label, turn::Session, turn::as_refs,
+};
 use crate::{
     checks,
     contract::{Report, Status},
     forge::{NewPullRequest, PullRequest, Target},
     settings::SelfReview,
     ticket::{State, slug},
+    workflow::Step,
 };
 use anyhow::{Context, Result};
 
@@ -70,7 +73,7 @@ impl Job<'_> {
             .create(&target, &branch, &self.base_ref()?)
             .await?;
         self.ticket.worktree = Some(path);
-        Ok(State::Implementing)
+        Ok(self.workflow()?.first())
     }
 
     /// Record the agent's report and turn its status into the next state.
@@ -109,7 +112,7 @@ impl Job<'_> {
         let report = self
             .turn(&self.project.agent.clone(), &prompt, Session::Ticket)
             .await?;
-        let next = self.accept(report, State::Checking).await?;
+        let next = self.accept(report, self.next(Step::Implement)?).await?;
         self.commit_leftovers("Complete the agent's changes")
             .await?;
         self.require_commits().await?;
@@ -148,16 +151,6 @@ impl Job<'_> {
         Ok(())
     }
 
-    /// The state after the checks pass.
-    fn after_checks(&self) -> State {
-        let review = self.project.review.self_review != SelfReview::Off;
-        if review && !self.ticket.self_reviewed {
-            State::SelfReview
-        } else {
-            State::Publishing
-        }
-    }
-
     /// Count a fix round, blocking once the budget is spent.
     fn next_fix_round(&mut self, failure: &checks::Failure) -> Result<()> {
         self.ticket.fix_rounds += 1;
@@ -180,7 +173,7 @@ impl Job<'_> {
         let Some(failure) = checks::run(&self.project.checks, &worktree, cancel, secrets).await?
         else {
             self.log("checks passed");
-            return Ok(self.after_checks());
+            return self.next(Step::Check);
         };
         self.log(&format!(
             "check `{}` failed ({})",
@@ -215,7 +208,7 @@ impl Job<'_> {
         self.ticket.self_reviewed = true;
         self.event("SELF_REVIEW", &serde_json::json!({ "status": format!("{:?}", review.status), "summary": review.summary }))?;
         if review.status == Status::Done {
-            return Ok(State::Publishing);
+            return self.next(Step::SelfReview);
         }
         let prompt = self
             .svc
@@ -224,7 +217,7 @@ impl Job<'_> {
         let report = self
             .turn(&self.project.agent.clone(), &prompt, Session::Ticket)
             .await?;
-        let next = self.accept(report, State::Checking).await?;
+        let next = self.accept(report, self.after_change()?).await?;
         self.commit_leftovers("Address the review findings").await?;
         Ok(next)
     }
@@ -244,14 +237,17 @@ impl Job<'_> {
         let known = self.ticket.pr_number == Some(pr.number);
         self.ticket.pr_number = Some(pr.number);
         self.save()?;
-        if known {
-            // Published again, after guidance: the issue already links it.
-            return Ok(State::AwaitingReview);
+        if !known {
+            let note = format!("Amaru opened {} for this issue.", pr.url);
+            let (repo, number) = (&self.ticket.repo, self.ticket.number);
+            self.svc.source.comment(repo, number, &note).await?;
         }
-        let note = format!("Amaru opened {} for this issue.", pr.url);
-        let (repo, number) = (&self.ticket.repo, self.ticket.number);
-        self.svc.source.comment(repo, number, &note).await?;
-        Ok(State::AwaitingReview)
+        // Published again after guidance, the issue already links it.
+        let next = self.next(Step::Publish)?;
+        if next == State::Done {
+            release(self.svc, &mut self.ticket).await?;
+        }
+        Ok(next)
     }
 
     async fn ensure_pr(&self, target: &Target, branch: &str) -> Result<PullRequest> {

@@ -90,6 +90,10 @@ pub enum Origin {
     Autonomous,
 }
 
+fn default_workflow() -> String {
+    crate::workflow::CODE.into()
+}
+
 /// One issue being worked on: a GitHub issue of `repo`, or a Jira issue of
 /// the project that `repo` belongs to.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -105,6 +109,10 @@ pub struct Ticket {
     #[serde(default)]
     pub body: String,
     pub origin: Origin,
+    /// The workflow the ticket follows, chosen from its project when it
+    /// starts. Tickets from before workflows existed follow `code`.
+    #[serde(default = "default_workflow")]
+    pub workflow: String,
     pub state: State,
     /// Why the ticket is blocked, or what it waits for.
     pub reason: Option<String>,
@@ -153,6 +161,7 @@ impl Ticket {
             title,
             body: String::new(),
             origin,
+            workflow: String::new(),
             state: State::Queued,
             reason: None,
             branch: None,

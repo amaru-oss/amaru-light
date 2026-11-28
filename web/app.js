@@ -381,6 +381,7 @@ function drawSide(container, t) {
       fact("Base", t.base ? h("code", {}, t.base) : null),
       fact("Stacked on", t.stacked_on ? `#${t.stacked_on}` : null),
       fact("Origin", t.origin),
+      fact("Workflow", t.workflow),
       fact("Fix rounds", String(t.fix_rounds)),
       fact("Review rounds", String(t.review_rounds)),
       fact("Self-reviewed", t.self_reviewed ? "yes" : null),
@@ -498,6 +499,7 @@ async function showProjects() {
     h("p", { class: "sub" }, p.fork ? `Pushes to the fork ${p.fork}` : "Pushes to the repository"),
     h("div", { class: "facts" }, h("dl", {},
       fact("Base branch", h("code", {}, p.base_branch)),
+      fact("Workflow", [p.workflow, " ", h("span", { class: "sub" }, p.steps.join(" → "))]),
       fact("Tickets from", p.jira ? `Jira ${p.jira}` : "GitHub issues"),
       fact("Agent", p.waiting_for_sign_in.length
         ? [p.agent, " ", h("span", { class: "state blocked" }, `${p.waiting_for_sign_in.join(", ")} not signed in`)]

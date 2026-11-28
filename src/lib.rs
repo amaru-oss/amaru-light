@@ -22,4 +22,5 @@ pub mod setup;
 mod testing;
 pub mod ticket;
 pub mod web;
+pub mod workflow;
 pub mod worktree;

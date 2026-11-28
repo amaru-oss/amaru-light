@@ -4,7 +4,10 @@
 //! project file per repository. Both reject unknown keys, so a typo is an
 //! error instead of a silent default.
 
-use crate::forge::Reaction;
+use crate::{
+    forge::Reaction,
+    workflow::{self, Step, Workflow},
+};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -217,6 +220,10 @@ pub struct DaemonSettings {
     /// The web interface that `amaru serve` starts.
     #[serde(default)]
     pub web: WebSettings,
+    /// Workflows besides the built-in `code`, by name: the steps a ticket
+    /// goes through, in order.
+    #[serde(default)]
+    pub workflows: BTreeMap<String, Vec<Step>>,
 }
 
 /// The web interface and its HTTP API.
@@ -464,6 +471,14 @@ pub struct ProjectSettings {
     pub review: ReviewSettings,
     #[serde(default)]
     pub workspace: WorkspaceSettings,
+    /// The workflow this project's tickets follow: `code`, or one defined in
+    /// the daemon file.
+    #[serde(default = "default_workflow")]
+    pub workflow: String,
+}
+
+fn default_workflow() -> String {
+    workflow::CODE.into()
 }
 
 impl ProjectSettings {
@@ -522,6 +537,8 @@ pub struct Settings {
     pub base_dir: PathBuf,
     /// See `secret_env`.
     secrets: Vec<String>,
+    /// Every workflow by name, the built-in one included.
+    flows: BTreeMap<String, Workflow>,
 }
 
 /// Variables that always hold credentials of the daemon, never of an agent.
@@ -532,6 +549,18 @@ const SECRET_ENV: [&str; 5] = [
     "GITHUB_ENTERPRISE_TOKEN",
     crate::web::TOKEN_ENV,
 ];
+
+/// The built-in workflow and the daemon file's, validated.
+fn workflows(defined: &BTreeMap<String, Vec<Step>>) -> Result<BTreeMap<String, Workflow>> {
+    let mut flows = BTreeMap::from([(workflow::CODE.to_owned(), Workflow::code())]);
+    for (name, steps) in defined {
+        if name == workflow::CODE {
+            bail!("workflow '{name}' is built in and cannot be redefined");
+        }
+        flows.insert(name.clone(), Workflow::new(name, steps.clone())?);
+    }
+    Ok(flows)
+}
 
 fn secret_names(projects: &[ProjectSettings]) -> Vec<String> {
     let mut names: Vec<String> = SECRET_ENV.iter().map(|s| (*s).to_owned()).collect();
@@ -574,11 +603,13 @@ impl Settings {
             .map(|p| read_yaml(&base_dir.join(p)))
             .collect::<Result<Vec<ProjectSettings>>>()?;
         let secrets = secret_names(&projects);
+        let flows = workflows(&daemon.workflows)?;
         let settings = Self {
             daemon,
             projects,
             base_dir,
             secrets,
+            flows,
         };
         settings.validate()?;
         Ok(settings)
@@ -608,6 +639,13 @@ impl Settings {
     /// An agent's `env` can still set one of them on purpose.
     pub fn secret_env(&self) -> &[String] {
         &self.secrets
+    }
+
+    /// A workflow by name: `code` or one from the daemon file.
+    pub fn workflow(&self, name: &str) -> Result<&Workflow> {
+        self.flows
+            .get(name)
+            .with_context(|| format!("workflow '{name}' is not defined in the daemon file"))
     }
 
     pub fn agent(&self, name: &str) -> Result<&AgentSettings> {
@@ -669,6 +707,8 @@ impl Settings {
             bail!("{repo}: fork must be owner/name and differ from repo");
         }
         self.agent(&project.agent)?;
+        self.workflow(&project.workflow)
+            .with_context(|| format!("{repo}: unknown workflow"))?;
         if project.review.self_review == SelfReview::OtherAgent {
             let reviewer = project.review.reviewer_agent.as_deref();
             self.agent(reviewer.context("review.reviewer_agent is required for other_agent")?)?;
@@ -741,6 +781,24 @@ mod tests {
     fn rejects_unknown_keys() {
         let err = load(DAEMON, &format!("{PROJECT}chekcs: []\n")).unwrap_err();
         assert!(format!("{err:#}").contains("unknown field"));
+    }
+
+    #[test]
+    fn reads_workflows() {
+        let settings = load(DAEMON, PROJECT).unwrap();
+        let project = settings.project("me/demo").unwrap();
+        assert_eq!(project.workflow, "code");
+        assert_eq!(settings.workflow("code").unwrap(), &Workflow::code());
+        let daemon = format!("{DAEMON}workflows:\n  quick: [implement, publish]\n");
+        let settings = load(&daemon, &format!("{PROJECT}workflow: quick\n")).unwrap();
+        let quick = settings.workflow("quick").unwrap();
+        assert_eq!(quick.steps, [Step::Implement, Step::Publish]);
+        let unknown = load(DAEMON, &format!("{PROJECT}workflow: quick\n")).unwrap_err();
+        assert!(format!("{unknown:#}").contains("workflow 'quick' is not defined"));
+        let redefined = format!("{DAEMON}workflows:\n  code: [implement, publish]\n");
+        assert!(load(&redefined, PROJECT).is_err());
+        let invalid = format!("{DAEMON}workflows:\n  bad: [publish, implement]\n");
+        assert!(load(&invalid, PROJECT).is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ use crate::{
     forge::{Feedback, FeedbackKind, PullRequest},
     settings::ProjectSettings,
     ticket::{State, Ticket},
+    workflow::Step,
 };
 use anyhow::{Context, Result};
 use serde_json::json;
@@ -103,6 +104,12 @@ async fn finish(svc: &Services, ticket: &mut Ticket) -> Result<()> {
     svc.store.save(ticket)?;
     svc.store
         .event(ticket.id, "STATE", &json!({ "to": State::Done }))?;
+    release(svc, ticket).await
+}
+
+/// Let go of a ticket whose work is over: its issue loses the working
+/// label and its worktree is deleted.
+pub(super) async fn release(svc: &Services, ticket: &mut Ticket) -> Result<()> {
     svc.source
         .remove_label(&ticket.repo, ticket.number, WORKING_LABEL)
         .await?;
@@ -203,6 +210,9 @@ impl Job<'_> {
 
     /// One check-and-fix round; true while another round is needed.
     async fn check_until_green(&mut self) -> Result<bool> {
+        if !self.workflow()?.has(Step::Check) {
+            return Ok(false);
+        }
         match self.check().await? {
             State::Checking => Ok(true),
             _ => Ok(false),

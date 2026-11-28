@@ -36,6 +36,29 @@ async fn takes_an_issue_to_a_pull_request_in_one_session() {
 }
 
 #[tokio::test]
+async fn follows_the_project_workflow() {
+    // No checks and no review loop: done once the pull request is open.
+    let fake = Fake::with_workflow("false", "[implement, publish]").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.workflow, "custom");
+    assert_eq!(ticket.state, State::Done);
+    assert_eq!(ticket.fix_rounds, 0);
+    assert_eq!(ticket.pr_number, Some(100));
+    assert!(ticket.worktree.is_none());
+    assert!(fake.upstream_has("amaru/1-add-a-feature").await);
+    let forge = fake.forge.state();
+    assert!(!forge.labels.contains(&(1, WORKING_LABEL.to_owned())));
+}
+
+#[tokio::test]
+async fn the_code_workflow_is_the_default() {
+    let fake = Fake::new("").await;
+    let ticket = drive(&fake, fake.claim(1).await).await;
+    assert_eq!(ticket.workflow, "code");
+    assert_eq!(ticket.state, State::AwaitingReview);
+}
+
+#[tokio::test]
 async fn names_a_jira_ticket_by_its_key() {
     let fake = Fake::jira().await;
     fake.forge.update_issue(1, |i| i.key = Some("APP-1".into()));

@@ -17,7 +17,7 @@ Goals:
 - Runs unattended for days on a laptop, a home server or a cloud VM.
 
 Non-goals: team features (multi-tenancy, RBAC), auto-merge, agent SDKs, a
-general workflow engine.
+general workflow engine (workflows are lists of built-in step kinds).
 
 ## Why v1 falls short
 
@@ -79,6 +79,14 @@ Any state -> BLOCKED (reason posted on the issue) | CANCELLED
 
 `IMPLEMENTING`, check fixes and `ADDRESSING_REVIEW` share one resumable
 session. A ticket in `AWAITING_REVIEW` does not use a worker slot.
+
+This is the built-in `code` workflow. A workflow is data: an ordered list of
+step kinds (`implement`, `check`, `self_review`, `publish`, `review_loop`)
+named in the daemon file and chosen per project, so a project can leave steps
+out. The step kinds themselves are Rust, and each maps to one of the states
+above; the next state after a step is the next step the workflow lists. This
+is not a general workflow engine: there are no conditions or expressions,
+only each step's own outcomes (pass, retry, block).
 
 ## Components
 

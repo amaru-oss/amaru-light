@@ -301,7 +301,7 @@ async fn seed(root: &Path) -> PathBuf {
     seed
 }
 
-fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
+fn write_settings(root: &Path, check: &str, extra: &str, daemon_extra: &str) -> PathBuf {
     let agent = root.join("agent/claude");
     std::fs::create_dir_all(agent.parent().unwrap()).unwrap();
     std::fs::write(&agent, AGENT).unwrap();
@@ -315,7 +315,7 @@ fn write_settings(root: &Path, check: &str, extra: &str) -> PathBuf {
         "repo: me/app\nagent: claude\nintake: {{labels: [amaru]}}\nreview: {{reviewers: [me]}}\n{checks}{extra}"
     )).unwrap();
     let daemon = format!(
-        "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n",
+        "state_dir: state\npoll_interval: 1s\nagents:\n  claude: {{driver: claude, command: \"{}\"}}\nprojects: [project.yaml]\n{daemon_extra}",
         agent.display()
     );
     std::fs::write(root.join("daemon.yaml"), daemon).unwrap();
@@ -338,9 +338,20 @@ impl Fake {
     }
 
     pub async fn with_project(check: &str, extra: &str) -> Self {
+        Self::with_files(check, extra, "").await
+    }
+
+    /// A project that follows the workflow `custom`, made of `steps`.
+    pub async fn with_workflow(check: &str, steps: &str) -> Self {
+        let daemon = format!("workflows:\n  custom: {steps}\n");
+        Self::with_files(check, "workflow: custom\n", &daemon).await
+    }
+
+    async fn with_files(check: &str, extra: &str, daemon_extra: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         upstream(dir.path()).await;
-        let settings = Settings::load(&write_settings(dir.path(), check, extra)).unwrap();
+        let path = write_settings(dir.path(), check, extra, daemon_extra);
+        let settings = Settings::load(&path).unwrap();
         let forge = Arc::new(FakeForge::default());
         forge.state().remotes = Some(dir.path().join("remotes"));
         let url_base = format!("file://{}/remotes/", dir.path().display());
