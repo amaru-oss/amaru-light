@@ -175,8 +175,10 @@ impl Job<'_> {
     pub(super) async fn check(&mut self) -> Result<State> {
         let worktree = self.worktree()?;
         let cancel = self.cancel.clone();
+        let secrets = self.svc.settings.secret_env();
         self.log("running the checks");
-        let Some(failure) = checks::run(&self.project.checks, &worktree, cancel).await? else {
+        let Some(failure) = checks::run(&self.project.checks, &worktree, cancel, secrets).await?
+        else {
             self.log("checks passed");
             return Ok(self.after_checks());
         };

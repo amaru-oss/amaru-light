@@ -142,6 +142,10 @@ push and a reply per addressed thread. The daemon never resolves threads.
   idempotent, so a restart resumes where it stopped.
 - Transient errors retry with backoff and do not consume fix budgets.
 - No merges. Pushes only to branches the daemon created.
+- Agents and project checks never see the daemon's credentials: `GH_TOKEN`,
+  `GITHUB_TOKEN`, the GitHub Enterprise tokens, `AMARU_WEB_TOKEN` and each
+  Jira `token_env` are removed from their environment. Every push, comment
+  and pull request goes through the daemon, which is where its rules apply.
 - The worktree of a BLOCKED ticket is kept for `workspace.keep_blocked`
   (for example `7d`, `0`, `forever`).
 

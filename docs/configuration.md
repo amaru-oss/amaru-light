@@ -63,7 +63,7 @@ projects:
 | `command` | required | The executable, on `PATH` or as an absolute path. |
 | `args` | `[]` | Extra arguments, added to every call. Use them for the permission mode. |
 | `model` | none | Passed as `--model`. Leave it out to use the CLI's default. For Bob it is the model tier, `fast`, `premium` or `ultra`, set as `BOB_SHELL_MODEL_TIER`. |
-| `env` | `{}` | Extra environment variables for the agent process. |
+| `env` | `{}` | Extra environment variables for the agent process. The daemon's credentials (`GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN`, `AMARU_WEB_TOKEN` and each Jira `token_env`) are removed from the agent's and the checks' environment; setting one here gives it back on purpose. |
 | `login` | by driver | Arguments to `command` that sign the CLI in from the web page. Claude Code: `[auth, login]`. Codex: `[login, --device-auth]`. Bob: none. `[]` turns the Sign in button off. |
 | `login_with_key` | by driver | Arguments to `command` that sign the CLI in with an API key read from stdin, for the web page's **Use an API key**. The page writes the key and closes stdin. Codex: `[login, --with-api-key]`. Claude Code and Bob: none, since they read `ANTHROPIC_API_KEY` and `BOB_API_KEY` (set them in `env` or the container). `[]` turns it off. |
 | `login_status` | by driver | Arguments to `command` that tell whether the CLI is signed in; exit code 0 means yes. The daemon runs it every poll and takes no work for the projects that use an agent that is not signed in; `[]` turns the check off. Claude Code: `[auth, status, --text]`. Codex: `[login, status]`. Bob: none, so neither the page nor the daemon can tell. |

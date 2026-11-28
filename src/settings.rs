@@ -520,6 +520,27 @@ pub struct Settings {
     pub projects: Vec<ProjectSettings>,
     /// Directory of the daemon file; relative paths resolve against it.
     pub base_dir: PathBuf,
+    /// See `secret_env`.
+    secrets: Vec<String>,
+}
+
+/// Variables that always hold credentials of the daemon, never of an agent.
+const SECRET_ENV: [&str; 5] = [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+    crate::web::TOKEN_ENV,
+];
+
+fn secret_names(projects: &[ProjectSettings]) -> Vec<String> {
+    let mut names: Vec<String> = SECRET_ENV.iter().map(|s| (*s).to_owned()).collect();
+    for jira in projects.iter().filter_map(|p| p.jira.as_ref()) {
+        if !names.contains(&jira.token_env) {
+            names.push(jira.token_env.clone());
+        }
+    }
+    names
 }
 
 /// The most tickets the daemon will work on at once.
@@ -552,10 +573,12 @@ impl Settings {
             .iter()
             .map(|p| read_yaml(&base_dir.join(p)))
             .collect::<Result<Vec<ProjectSettings>>>()?;
+        let secrets = secret_names(&projects);
         let settings = Self {
             daemon,
             projects,
             base_dir,
+            secrets,
         };
         settings.validate()?;
         Ok(settings)
@@ -577,6 +600,14 @@ impl Settings {
             let number = p.jira.as_ref()?.parse(text)?;
             Some((p, number))
         })
+    }
+
+    /// Variables that hold the daemon's own credentials. Agent turns and
+    /// project checks run without them, so an agent can neither push nor
+    /// comment by itself: every outbound action goes through the daemon.
+    /// An agent's `env` can still set one of them on purpose.
+    pub fn secret_env(&self) -> &[String] {
+        &self.secrets
     }
 
     pub fn agent(&self, name: &str) -> Result<&AgentSettings> {
@@ -737,6 +768,10 @@ mod tests {
         let config = project.jira.as_ref().unwrap();
         assert_eq!(config.token_env, "JIRA_TOKEN");
         assert!(config.comment);
+        let secrets = settings.secret_env();
+        for name in ["GH_TOKEN", "GITHUB_TOKEN", "AMARU_WEB_TOKEN", "JIRA_TOKEN"] {
+            assert!(secrets.iter().any(|s| s == name), "{name}");
+        }
         assert_eq!(project.issue_name(12_345), "CAMEL-12345");
         assert_eq!(
             project.issue_url(7),

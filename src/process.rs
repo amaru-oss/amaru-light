@@ -32,6 +32,9 @@ pub struct Spec {
     pub program: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    /// Inherited variables the child must not see, such as the bot's tokens.
+    /// `env` is applied after, so a variable set there on purpose stays.
+    pub env_remove: Vec<String>,
     pub cwd: PathBuf,
     /// Written to stdin, which is then closed.
     pub stdin: Option<String>,
@@ -91,6 +94,9 @@ pub(crate) fn kill_group(child: &Child) {
 /// retried a few times.
 async fn spawn(spec: &Spec) -> Result<Child> {
     let mut command = Command::new(&spec.program);
+    for name in &spec.env_remove {
+        command.env_remove(name);
+    }
     command
         .args(&spec.args)
         .envs(&spec.env)
@@ -270,9 +276,21 @@ pub async fn shell(
     timeout: Duration,
     cancel: Option<Cancel>,
 ) -> Result<(Exit, String)> {
+    shell_without(command, cwd, timeout, cancel, Vec::new()).await
+}
+
+/// Like `shell`, without the inherited variables named in `env_remove`.
+pub async fn shell_without(
+    command: &str,
+    cwd: PathBuf,
+    timeout: Duration,
+    cancel: Option<Cancel>,
+    env_remove: Vec<String>,
+) -> Result<(Exit, String)> {
     let spec = Spec {
         program: "sh".into(),
         args: vec!["-c".into(), format!("exec 2>&1; {command}")],
+        env_remove,
         cwd,
         timeout,
         ..Spec::default()
@@ -347,6 +365,23 @@ mod tests {
         assert!(out.success());
         assert_eq!(lines, ["hello", "two"]);
         assert_eq!(out.stderr.trim(), "oops");
+    }
+
+    #[tokio::test]
+    async fn hides_inherited_variables() {
+        let mut spec = sh("echo ${HOME:-hidden} ${PATH:+path}", 5_000);
+        spec.env_remove = vec!["HOME".into()];
+        let mut lines = Vec::new();
+        run(&spec, None, &mut |l| lines.push(l.to_owned()))
+            .await
+            .unwrap();
+        assert_eq!(lines, ["hidden path"]);
+        spec.env.insert("HOME".into(), "/set/on/purpose".into());
+        lines.clear();
+        run(&spec, None, &mut |l| lines.push(l.to_owned()))
+            .await
+            .unwrap();
+        assert_eq!(lines, ["/set/on/purpose path"]);
     }
 
     #[tokio::test]

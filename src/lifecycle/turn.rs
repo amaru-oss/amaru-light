@@ -64,6 +64,7 @@ impl Job<'_> {
         let agent = Agent::new(self.svc.settings.agent(agent)?.clone());
         let cwd = self.worktree()?;
         let place = Workplace {
+            hidden_env: self.svc.settings.secret_env(),
             cwd: &cwd,
             timeout: self.project.step_timeout.0,
             idle: Some(self.project.idle_timeout.0).filter(|d| !d.is_zero()),

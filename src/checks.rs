@@ -23,13 +23,15 @@ pub async fn run(
     checks: &[CheckSettings],
     worktree: &Path,
     cancel: Option<Cancel>,
+    hidden_env: &[String],
 ) -> Result<Option<Failure>> {
     for check in checks {
-        let (exit, output) = process::shell(
+        let (exit, output) = process::shell_without(
             &check.run,
             worktree.to_path_buf(),
             check.timeout.0,
             cancel.clone(),
+            hidden_env.to_vec(),
         )
         .await?;
         if exit == Exit::Cancelled {
@@ -68,10 +70,15 @@ mod tests {
             check("tests", "echo 2 failed; exit 1"),
             check("never", "touch ran"),
         ];
-        let failure = run(&checks, dir.path(), None).await.unwrap().unwrap();
+        let failure = run(&checks, dir.path(), None, &[]).await.unwrap().unwrap();
         assert_eq!(failure.name, "tests");
         assert_eq!(failure.output, "2 failed\n");
         assert!(!dir.path().join("ran").exists());
-        assert!(run(&checks[..1], dir.path(), None).await.unwrap().is_none());
+        assert!(
+            run(&checks[..1], dir.path(), None, &[])
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

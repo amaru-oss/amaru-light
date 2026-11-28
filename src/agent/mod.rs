@@ -93,6 +93,8 @@ pub struct Workplace<'a> {
     /// Stop the turn once the agent prints nothing for this long.
     pub idle: Option<Duration>,
     pub cancel: Option<Cancel>,
+    /// Inherited variables the agent must not see: the daemon's own tokens.
+    pub hidden_env: &'a [String],
 }
 
 impl Agent {
@@ -118,6 +120,7 @@ impl Agent {
             program: self.settings.command.clone(),
             args: self.driver.args(turn, &self.settings),
             env,
+            env_remove: place.hidden_env.to_vec(),
             cwd: place.cwd.to_path_buf(),
             stdin: Some(turn.prompt.to_owned()),
             timeout: place.timeout,
@@ -179,6 +182,7 @@ mod tests {
             timeout: Duration::from_secs(10),
             idle: None,
             cancel: None,
+            hidden_env: &[],
         };
         let turn = Turn {
             prompt: "do it",
